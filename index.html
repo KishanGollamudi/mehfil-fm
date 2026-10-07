@@ -250,7 +250,8 @@ header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16
 </div>
 <script>
 // ── Config ───────────────────────────────────────────────────
-// No API key needed — uses YouTube autocomplete + scraping via proxy
+// Invidious instances — free YouTube API, no key needed
+const INVIDIOUS = ['https://invidious.f5.si', 'https://invidious.protokolla.fi'];
 
 const THEMES = {
   corporate:{label:'Corporate Majdoor',icon:'💼',title:'Corporate <em>Majdoor</em>',kicker:'9 to 5 · lofi focus beats',sub:'"Chai pe chalte hain?" — lofi bollywood to survive every deadline.',pill:'☕ Focus mode on',image:'assets/corporate-sunset.png',playlist:'PLqn8TmQNZp5owBysoqordPjLha-q7SJmI',accent:'#ffb35d',rgb:'255,179,93'},
@@ -438,20 +439,17 @@ function showSearchState(state) {
   $('suggestions-box').classList.toggle('show', state === 'suggest');
 }
 
-// Suggestions via YouTube autocomplete (no API key needed)
-function fetchSuggestions(q) {
+// Suggestions via Google autocomplete (no API key needed, uses firefox client for CORS)
+async function fetchSuggestions(q) {
   if (!q.trim()) { showSearchState(''); return; }
-  const cb = 'yt_suggest_' + Date.now();
-  const script = document.createElement('script');
-  script.src = 'https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q=' + encodeURIComponent(q) + '&callback=' + cb;
-  window[cb] = (data) => {
-    script.remove();
-    delete window[cb];
-    const suggestions = (data[1] || []).slice(0, 7).map(s => s[0]);
+  try {
+    const res = await fetch('https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=' + encodeURIComponent(q));
+    const data = await res.json();
+    const suggestions = (data[1] || []).slice(0, 7);
     renderSuggestions(suggestions, q);
-  };
-  script.onerror = () => { script.remove(); delete window[cb]; };
-  document.head.append(script);
+  } catch(e) {
+    // suggestions failed silently, user can still press Enter to search
+  }
 }
 
 function renderSuggestions(suggestions, q) {
@@ -475,34 +473,26 @@ function renderSuggestions(suggestions, q) {
   showSearchState('suggest');
 }
 
-// Full search via allorigins proxy scraping YouTube results page
+// Full search via Invidious API (free, no key, real YouTube data)
 async function doSearch(q) {
   if (!q.trim()) { showSearchState(''); return; }
   showSearchState('loading');
   $('suggestions-box').classList.remove('show');
-  try {
-    const ytUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q + ' song');
-    const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(ytUrl);
-    const res = await fetch(proxyUrl);
-    const data = await res.json();
-    const html = data.contents || '';
-    // extract ytInitialData JSON from page
-    const match = html.match(/var ytInitialData = (\{.+?\});/);
-    if (!match) { showSearchState('empty'); return; }
-    const ytData = JSON.parse(match[1]);
-    const contents = ytData?.contents?.twoColumnSearchResultsRenderer?.primaryContents
-      ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
-    const videos = contents
-      .filter(c => c.videoRenderer)
-      .map(c => c.videoRenderer)
-      .slice(0, 10);
-    if (!videos.length) { showSearchState('empty'); return; }
-    renderResults(videos);
-    showSearchState('results');
-  } catch(e) {
-    showSearchState('empty');
-    $('search-empty').textContent = 'Search failed. Check your connection and try again.';
+  let lastErr = null;
+  for (const host of INVIDIOUS) {
+    try {
+      const url = host + '/api/v1/search?q=' + encodeURIComponent(q) + '&type=video&fields=videoId,title,author,lengthSeconds,videoThumbnails&page=1';
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) { showSearchState('empty'); return; }
+      renderResults(data.slice(0, 10));
+      showSearchState('results');
+      return;
+    } catch(e) { lastErr = e; }
   }
+  $('search-empty').textContent = 'Search failed. Check your connection and try again.';
+  showSearchState('empty');
 }
 
 function renderResults(videos) {
@@ -510,12 +500,12 @@ function renderResults(videos) {
   container.innerHTML = '';
   videos.forEach(v => {
     const vid = v.videoId;
-    const title = v.title?.runs?.[0]?.text || 'Unknown';
-    const artist = v.ownerText?.runs?.[0]?.text || v.shortBylineText?.runs?.[0]?.text || '';
-    const thumb = v.thumbnail?.thumbnails?.[0]?.url || 'https://i.ytimg.com/vi/' + vid + '/default.jpg';
-    const duration = v.lengthText?.simpleText || '';
+    const title = v.title || 'Unknown';
+    const artist = v.author || '';
+    const thumbs = v.videoThumbnails || [];
+    const thumb = (thumbs.find(t => t.quality === 'medium') || thumbs[0] || {}).url || 'https://i.ytimg.com/vi/' + vid + '/mqdefault.jpg';
+    const duration = v.lengthSeconds ? Math.floor(v.lengthSeconds/60) + ':' + String(v.lengthSeconds%60).padStart(2,'0') : '';
     const song = { videoId: vid, title, artist, thumb };
-
     const div = document.createElement('div');
     div.className = 'sr-item';
     div.innerHTML = `
@@ -525,12 +515,8 @@ function renderResults(videos) {
         <div class="sr-sub">${artist}${duration ? ' · ' + duration : ''}</div>
       </div>
       <div class="sr-actions">
-        <button class="sr-btn" title="Play" aria-label="Play">
-          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        </button>
-        <button class="sr-btn" title="Add to playlist" aria-label="Add to playlist">
-          <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h12M3 18h8"/><path d="M17 14v6m-3-3h6"/></svg>
-        </button>
+        <button class="sr-btn" title="Play" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+        <button class="sr-btn" title="Add to playlist" aria-label="Add to playlist"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h12M3 18h8"/><path d="M17 14v6m-3-3h6"/></svg></button>
       </div>`;
     const [playBtn, addBtn] = div.querySelectorAll('.sr-btn');
     playBtn.onclick = (e) => { e.stopPropagation(); playVideoById(vid, title, artist); };

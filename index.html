@@ -240,7 +240,7 @@ header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16
     <button class="modal-cancel" id="modal-cancel">Cancel</button>
   </div>
 </div>
-<audio id="hq-audio" preload="auto" crossorigin="anonymous"></audio>
+<audio id="hq-audio" preload="auto"></audio>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div class="start" id="start">
   <button id="start-btn">
@@ -271,45 +271,24 @@ let pendingSong = null, editingPlId = null;
 let queue = [], queueIdx = 0, currentVideoId = null;
 
 // ── Web Audio API chain ───────────────────────────────────────
-// audio → source → compressor → highShelf(air) → lowShelf(warmth) → gainNode → destination
-let audioCtx = null, gainNode = null, sourceNode = null;
+let audioCtx = null, gainNode = null;
 const audio = $('hq-audio');
 
 function initAudioContext() {
   if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000, latencyHint: 'playback' });
-  sourceNode = audioCtx.createMediaElementSource(audio);
-
-  // Dynamics compressor — prevents clipping, evens out loud/quiet passages
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+  const src = audioCtx.createMediaElementSource(audio);
   const comp = audioCtx.createDynamicsCompressor();
-  comp.threshold.value = -18;
-  comp.knee.value = 12;
-  comp.ratio.value = 3;
-  comp.attack.value = 0.003;
-  comp.release.value = 0.18;
-
-  // High shelf +2.5dB at 10kHz — restores "air" lost in compression
-  const highShelf = audioCtx.createBiquadFilter();
-  highShelf.type = 'highshelf';
-  highShelf.frequency.value = 10000;
-  highShelf.gain.value = 2.5;
-
-  // Low shelf +2dB at 120Hz — warmth/body for vocals and instruments
-  const lowShelf = audioCtx.createBiquadFilter();
-  lowShelf.type = 'lowshelf';
-  lowShelf.frequency.value = 120;
-  lowShelf.gain.value = 2.0;
-
-  // Master gain
+  comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 3;
+  comp.attack.value = 0.003; comp.release.value = 0.18;
+  const hi = audioCtx.createBiquadFilter();
+  hi.type = 'highshelf'; hi.frequency.value = 10000; hi.gain.value = 2.5;
+  const lo = audioCtx.createBiquadFilter();
+  lo.type = 'lowshelf'; lo.frequency.value = 120; lo.gain.value = 2.0;
   gainNode = audioCtx.createGain();
   const v = +localStorage.getItem('mehfil-vol');
   gainNode.gain.value = (Number.isFinite(v) && v >= 0 ? v : 80) / 100;
-
-  sourceNode.connect(comp);
-  comp.connect(highShelf);
-  highShelf.connect(lowShelf);
-  lowShelf.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
+  src.connect(comp); comp.connect(hi); hi.connect(lo); lo.connect(gainNode); gainNode.connect(audioCtx.destination);
 }
 
 // ── Persistence ───────────────────────────────────────────────
@@ -385,141 +364,50 @@ async function fetchPlaylistIds(playlistId) {
   return [];
 }
 
-// ── Core: smooth playback via MediaSource + chunked fetch ────────────
-let mediaSource = null, sourceBuffer = null, fetchController = null;
-
+// ── Playback ─────────────────────────────────────────────────────
 async function playVideoById(videoId, title, artist) {
   if (!started) { started = true; $('start').classList.add('gone'); }
   initAudioContext();
   if (audioCtx.state === 'suspended') await audioCtx.resume();
-
-  // Cancel any in-progress fetch
-  if (fetchController) { fetchController.abort(); fetchController = null; }
   currentVideoId = videoId;
-
   $('track').textContent = title || 'Loading…';
   $('channel').textContent = artist || '';
   setStatus('Loading…');
   audio.pause();
-
+  audio.src = '';
   try {
     const res = await fetch('/.netlify/functions/stream?id=' + videoId);
     if (currentVideoId !== videoId) return;
-    if (!res.ok) throw new Error('stream info failed');
-    const stream = await res.json();
+    if (!res.ok) throw new Error('fetch failed ' + res.status);
+    const data = await res.json();
     if (currentVideoId !== videoId) return;
-
-    // Update metadata
-    if (stream.title) {
-      $('track').textContent = stream.title;
-      $('channel').textContent = stream.author || artist || '';
+    if (data.error) throw new Error(data.error);
+    if (data.title) {
+      $('track').textContent = data.title;
+      $('channel').textContent = data.author || artist || '';
       if ('mediaSession' in navigator)
-        navigator.mediaSession.metadata = new MediaMetadata({ title: stream.title, artist: stream.author || '', album: 'Mehfil FM' });
+        navigator.mediaSession.metadata = new MediaMetadata({ title: data.title, artist: data.author || '', album: 'Mehfil FM' });
     }
-
-    // Use MediaSource to feed audio in chunks — prevents range-request breaks
-    // on YouTube's signed CDN URLs
-    const mimeType = stream.mimeType || 'audio/webm; codecs="opus"';
-    if (window.MediaSource && MediaSource.isTypeSupported(mimeType)) {
-      await playViaMediaSource(stream.url, mimeType, videoId);
-    } else {
-      // Fallback: direct src (Safari doesn't support webm/opus)
-      audio.src = stream.url;
-      audio.load();
-      await audio.play();
-    }
+    audio.src = data.url;
+    audio.load();
+    await audio.play();
   } catch(err) {
     if (currentVideoId !== videoId) return;
-    toast('Skipping unavailable track…');
-    playNext();
+    console.error('playVideoById:', err);
+    setStatus('Unavailable, trying next…');
+    setTimeout(playNext, 1500);
   }
-}
-
-async function playViaMediaSource(url, mimeType, videoId) {
-  // Tear down previous MediaSource
-  if (mediaSource && mediaSource.readyState === 'open') {
-    try { mediaSource.endOfStream(); } catch(e) {}
-  }
-  mediaSource = new MediaSource();
-  audio.src = URL.createObjectURL(mediaSource);
-
-  await new Promise((resolve, reject) => {
-    mediaSource.addEventListener('sourceopen', resolve, { once: true });
-    mediaSource.addEventListener('error', reject, { once: true });
-  });
-
-  if (currentVideoId !== videoId) return;
-
-  sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-  sourceBuffer.mode = 'sequence';
-
-  fetchController = new AbortController();
-  const signal = fetchController.signal;
-
-  // Start playback immediately, keep feeding chunks in background
-  const CHUNK = 512 * 1024; // 512KB chunks — smooth buffer without memory bloat
-  let offset = 0;
-  let firstChunk = true;
-
-  const pump = async () => {
-    try {
-      while (currentVideoId === videoId) {
-        const headers = { 'Range': 'bytes=' + offset + '-' + (offset + CHUNK - 1) };
-        const r = await fetch(url, { headers, signal });
-        if (!r.ok && r.status !== 206) break; // end of stream or error
-
-        const chunk = await r.arrayBuffer();
-        if (!chunk.byteLength) break;
-
-        // Wait for sourceBuffer to be ready
-        await new Promise(res => {
-          if (!sourceBuffer.updating) return res();
-          sourceBuffer.addEventListener('updateend', res, { once: true });
-        });
-
-        if (currentVideoId !== videoId) return;
-        sourceBuffer.appendBuffer(chunk);
-        offset += chunk.byteLength;
-
-        if (firstChunk) {
-          firstChunk = false;
-          try { await audio.play(); } catch(e) {}
-        }
-
-        // If we got less than a full chunk, we've reached the end
-        if (chunk.byteLength < CHUNK) {
-          await new Promise(res => {
-            if (!sourceBuffer.updating) return res();
-            sourceBuffer.addEventListener('updateend', res, { once: true });
-          });
-          if (mediaSource.readyState === 'open') mediaSource.endOfStream();
-          break;
-        }
-      }
-    } catch(e) {
-      if (e.name !== 'AbortError' && currentVideoId === videoId) {
-        toast('Stream interrupted, retrying…');
-        playNext();
-      }
-    }
-  };
-
-  pump();
 }
 
 function playNext() {
-  if (fetchController) { fetchController.abort(); fetchController = null; }
   if (!queue.length) return;
   queueIdx = (queueIdx + 1) % queue.length;
-  const v = queue[queueIdx];
-  playVideoById(v.videoId, v.title, v.author);
+  playVideoById(queue[queueIdx].videoId, queue[queueIdx].title, queue[queueIdx].author);
 }
 function playPrev() {
-  if (fetchController) { fetchController.abort(); fetchController = null; }
   if (!queue.length) return;
   queueIdx = (queueIdx - 1 + queue.length) % queue.length;
-  const v = queue[queueIdx];
-  playVideoById(v.videoId, v.title, v.author);
+  playVideoById(queue[queueIdx].videoId, queue[queueIdx].title, queue[queueIdx].author);
 }
 
 async function loadThemePlaylist() {
@@ -528,7 +416,6 @@ async function loadThemePlaylist() {
   $('channel').textContent = THEMES[active].label;
   const ids = await fetchPlaylistIds(THEMES[active].playlist);
   if (!ids.length) { setStatus('Playlist unavailable'); return; }
-  // Fisher-Yates shuffle
   queue = [...ids];
   for (let i = queue.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -538,13 +425,16 @@ async function loadThemePlaylist() {
   playVideoById(queue[0].videoId, queue[0].title, queue[0].author);
 }
 
-// ── Audio element events ──────────────────────────────────────
+// ── Audio element events ───────────────────────────────────
 audio.addEventListener('playing', () => setPlayUI(true));
-audio.addEventListener('pause', () => setPlayUI(false));
+audio.addEventListener('pause', () => { if (audio.src && audio.src !== window.location.href) setPlayUI(false); });
 audio.addEventListener('waiting', () => setStatus('Buffering…'));
 audio.addEventListener('canplay', () => { if (!audio.paused) setStatus('Playing'); });
-audio.addEventListener('ended', playNext);
-audio.addEventListener('error', () => { toast('Skipping unavailable track…'); playNext(); });
+audio.addEventListener('ended', () => { if (currentVideoId) playNext(); });
+audio.addEventListener('error', () => {
+  if (!audio.src || audio.src === window.location.href) return;
+  if (currentVideoId) { setStatus('Unavailable, trying next…'); setTimeout(playNext, 1500); }
+});
 
 function startPlayback() {
   started = true;

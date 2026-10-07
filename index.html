@@ -140,7 +140,7 @@ header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16
 .start button{padding:22px 36px;border:1px solid #fff8;border-radius:20px;color:#fff;background:#120b09e0;box-shadow:0 18px 50px #000a}
 .start strong{display:block;font-size:1.2rem}
 .start span{display:block;margin-top:6px;color:#e7d5c6;font-size:.84rem}
-#yt-wrap{position:fixed;left:-9999px;top:-9999px;width:320px;height:180px;pointer-events:none}
+#yt-wrap{position:fixed;bottom:0;right:0;width:320px;height:180px;pointer-events:none;opacity:0;z-index:-1}
 @media(max-width:620px){
   .app{padding:15px}
   .brand span{display:none}
@@ -345,7 +345,7 @@ function playVideoById(videoId, title, artist) {
 window.onYouTubeIframeAPIReady = function() {
   player = new YT.Player('yt-player', {
     width: 320, height: 180,
-    playerVars: { autoplay: 0, playsinline: 1, controls: 0, rel: 0, modestbranding: 1, origin: location.origin },
+    playerVars: { autoplay: 1, playsinline: 1, controls: 0, rel: 0, modestbranding: 1, iv_load_policy: 3, enablejsapi: 1, origin: location.hostname ? location.origin : '' },
     events: {
       onReady() {
         try {
@@ -372,8 +372,12 @@ window.onYouTubeIframeAPIReady = function() {
           setPlayUI(false);
         } else if (e.data === S.BUFFERING) {
           setStatus('Buffering…');
+          // don't reset play UI — still playing, just buffering
         } else if (e.data === S.ENDED) {
           try { player.nextVideo(); } catch(err) {}
+        } else if (e.data === S.UNSTARTED) {
+          // playlist loaded but not started — kick it off
+          setTimeout(() => { try { player.playVideo(); } catch(err) {} }, 500);
         }
       },
       onError() {

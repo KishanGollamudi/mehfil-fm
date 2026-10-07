@@ -502,26 +502,54 @@ function renderResults(videos) {
     const vid = v.videoId;
     const title = v.title || 'Unknown';
     const artist = v.author || '';
-    const thumbs = v.videoThumbnails || [];
-    const thumb = (thumbs.find(t => t.quality === 'medium') || thumbs[0] || {}).url || 'https://i.ytimg.com/vi/' + vid + '/mqdefault.jpg';
+    // always use YouTube CDN for thumbnails — never Invidious server URLs
+    const thumb = 'https://i.ytimg.com/vi/' + vid + '/mqdefault.jpg';
     const duration = v.lengthSeconds ? Math.floor(v.lengthSeconds/60) + ':' + String(v.lengthSeconds%60).padStart(2,'0') : '';
     const song = { videoId: vid, title, artist, thumb };
+
     const div = document.createElement('div');
     div.className = 'sr-item';
-    div.innerHTML = `
-      <img class="sr-thumb" src="${thumb}" alt="" loading="lazy">
-      <div class="sr-meta">
-        <div class="sr-title">${title}</div>
-        <div class="sr-sub">${artist}${duration ? ' · ' + duration : ''}</div>
-      </div>
-      <div class="sr-actions">
-        <button class="sr-btn" title="Play" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
-        <button class="sr-btn" title="Add to playlist" aria-label="Add to playlist"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h12M3 18h8"/><path d="M17 14v6m-3-3h6"/></svg></button>
-      </div>`;
-    const [playBtn, addBtn] = div.querySelectorAll('.sr-btn');
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'sr-title';
+    titleEl.textContent = title;
+
+    const subEl = document.createElement('div');
+    subEl.className = 'sr-sub';
+    subEl.textContent = artist + (duration ? ' · ' + duration : '');
+
+    const img = document.createElement('img');
+    img.className = 'sr-thumb';
+    img.src = thumb;
+    img.alt = '';
+    img.loading = 'lazy';
+
+    const meta = document.createElement('div');
+    meta.className = 'sr-meta';
+    meta.append(titleEl, subEl);
+
+    const playBtn = document.createElement('button');
+    playBtn.className = 'sr-btn';
+    playBtn.title = 'Play';
+    playBtn.setAttribute('aria-label', 'Play ' + title);
+    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'sr-btn';
+    addBtn.title = 'Add to playlist';
+    addBtn.setAttribute('aria-label', 'Add to playlist');
+    addBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h12M3 18h8" stroke="currentColor" stroke-width="2" fill="none"/><path d="M17 14v6m-3-3h6" stroke="currentColor" stroke-width="2" fill="none"/></svg>';
+
+    const actions = document.createElement('div');
+    actions.className = 'sr-actions';
+    actions.append(playBtn, addBtn);
+
+    div.append(img, meta, actions);
+
     playBtn.onclick = (e) => { e.stopPropagation(); playVideoById(vid, title, artist); };
     addBtn.onclick = (e) => { e.stopPropagation(); openAddToPlaylist(song); };
     div.onclick = () => playVideoById(vid, title, artist);
+
     container.append(div);
   });
 }

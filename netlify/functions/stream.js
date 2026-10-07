@@ -9,26 +9,32 @@ exports.handler = async (event) => {
   try {
     const info = await ytdl.getInfo('https://www.youtube.com/watch?v=' + videoId);
 
-    // Priority: opus 160kbps (format 251) > webm audio > mp4 audio > any audio
     const formats = ytdl.filterFormats(info.formats, 'audioonly');
+    // Pick highest quality: opus 160kbps (251) first, then by bitrate
+    const sorted = formats.sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0));
     const best =
-      formats.find(f => f.itag === 251) ||           // opus 160kbps — best
+      formats.find(f => f.itag === 251) ||
       formats.find(f => f.audioCodec && f.audioCodec.includes('opus')) ||
-      formats.find(f => f.audioBitrate >= 128) ||
-      formats[0];
+      sorted[0];
 
     if (!best) return { statusCode: 404, body: JSON.stringify({ error: 'No audio stream found' }) };
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'private, max-age=300' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        // Short cache — YouTube stream URLs expire in ~6 hours, refresh before that
+        'Cache-Control': 'private, max-age=18000'
+      },
       body: JSON.stringify({
         url: best.url,
         codec: best.audioCodec,
         bitrate: best.audioBitrate,
+        mimeType: best.mimeType,
         title: info.videoDetails.title,
         author: info.videoDetails.author.name,
-        duration: info.videoDetails.lengthSeconds
+        duration: parseInt(info.videoDetails.lengthSeconds, 10)
       })
     };
   } catch (err) {

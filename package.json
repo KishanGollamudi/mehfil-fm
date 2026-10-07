@@ -1,0 +1,23 @@
+{
+  "name": "audio-web",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kishangollamudi/mehfil-fm.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kishangollamudi/mehfil-fm/issues"
+  },
+  "homepage": "https://github.com/kishangollamudi/mehfil-fm#readme",
+  "dependencies": {
+    "@distube/ytdl-core": "^4.16.12"
+  }
+}

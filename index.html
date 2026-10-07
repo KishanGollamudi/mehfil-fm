@@ -140,7 +140,7 @@ header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16
 .start button{padding:22px 36px;border:1px solid #fff8;border-radius:20px;color:#fff;background:#120b09e0;box-shadow:0 18px 50px #000a}
 .start strong{display:block;font-size:1.2rem}
 .start span{display:block;margin-top:6px;color:#e7d5c6;font-size:.84rem}
-#yt-wrap{position:fixed;bottom:0;right:0;width:320px;height:180px;pointer-events:none;opacity:0;z-index:-1}
+
 @media(max-width:620px){
   .app{padding:15px}
   .brand span{display:none}
@@ -240,7 +240,7 @@ header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16
     <button class="modal-cancel" id="modal-cancel">Cancel</button>
   </div>
 </div>
-<div id="yt-wrap"><div id="yt-player"></div></div>
+<audio id="hq-audio" preload="auto" crossorigin="anonymous"></audio>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div class="start" id="start">
   <button id="start-btn">
@@ -249,8 +249,7 @@ header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16
   </button>
 </div>
 <script>
-// ── Config ───────────────────────────────────────────────────
-// Invidious instances — free YouTube API, no key needed
+// ── Config ────────────────────────────────────────────────────
 const INVIDIOUS = ['https://invidious.f5.si', 'https://invidious.protokolla.fi'];
 
 const THEMES = {
@@ -262,12 +261,58 @@ const THEMES = {
   ghar:{label:'Ghar Ka Kaam',icon:'🧹',title:'Ghar Ka <em>Kaam</em>',kicker:'soft hindi · morning · kitchen vibes',sub:'"Amma bol rahi hai jaldi bartan dho…" — soft songs for small rituals.',pill:'🫧 Chore day comfort',image:'assets/bartan-time.png',playlist:'PLu68WmjcN84u34ZYc4aXZ55ZzSzVUyM5N',accent:'#ff7e9a',rgb:'255,126,154'}
 };
 
-const $ = id => document.getElementById(id);
-let active = 'corporate', player, started = false, toastTimer, searchTimer;
-let pendingSong = null; // song waiting to be added to a playlist
-let editingPlId = null; // playlist being renamed
+// Playlist video IDs — fetched once per theme, shuffled client-side
+const PLAYLIST_CACHE = {};
 
-// ── Persistence ──────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+let active = 'corporate', started = false, toastTimer, searchTimer;
+let pendingSong = null, editingPlId = null;
+// Playback state
+let queue = [], queueIdx = 0, currentVideoId = null;
+
+// ── Web Audio API chain ───────────────────────────────────────
+// audio → source → compressor → highShelf(air) → lowShelf(warmth) → gainNode → destination
+let audioCtx = null, gainNode = null, sourceNode = null;
+const audio = $('hq-audio');
+
+function initAudioContext() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000, latencyHint: 'playback' });
+  sourceNode = audioCtx.createMediaElementSource(audio);
+
+  // Dynamics compressor — prevents clipping, evens out loud/quiet passages
+  const comp = audioCtx.createDynamicsCompressor();
+  comp.threshold.value = -18;
+  comp.knee.value = 12;
+  comp.ratio.value = 3;
+  comp.attack.value = 0.003;
+  comp.release.value = 0.18;
+
+  // High shelf +2.5dB at 10kHz — restores "air" lost in compression
+  const highShelf = audioCtx.createBiquadFilter();
+  highShelf.type = 'highshelf';
+  highShelf.frequency.value = 10000;
+  highShelf.gain.value = 2.5;
+
+  // Low shelf +2dB at 120Hz — warmth/body for vocals and instruments
+  const lowShelf = audioCtx.createBiquadFilter();
+  lowShelf.type = 'lowshelf';
+  lowShelf.frequency.value = 120;
+  lowShelf.gain.value = 2.0;
+
+  // Master gain
+  gainNode = audioCtx.createGain();
+  const v = +localStorage.getItem('mehfil-vol');
+  gainNode.gain.value = (Number.isFinite(v) && v >= 0 ? v : 80) / 100;
+
+  sourceNode.connect(comp);
+  comp.connect(highShelf);
+  highShelf.connect(lowShelf);
+  lowShelf.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+}
+
+// ── Persistence ───────────────────────────────────────────────
 function loadPlaylists() {
   try { return JSON.parse(localStorage.getItem('mehfil-playlists')) || []; } catch(e) { return []; }
 }
@@ -275,7 +320,7 @@ function savePlaylists(pls) {
   try { localStorage.setItem('mehfil-playlists', JSON.stringify(pls)); } catch(e) {}
 }
 
-// ── Toast ────────────────────────────────────────────────────
+// ── Toast ─────────────────────────────────────────────────────
 function toast(msg) {
   $('toast').textContent = msg;
   $('toast').classList.add('show');
@@ -283,7 +328,7 @@ function toast(msg) {
   toastTimer = setTimeout(() => $('toast').classList.remove('show'), 3000);
 }
 
-// ── Player UI ────────────────────────────────────────────────
+// ── Player UI ─────────────────────────────────────────────────
 function setPlayUI(playing) {
   $('play-icon').innerHTML = playing ? '<path d="M7 5h4v14H7zm6 0h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
   $('btn-play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
@@ -293,7 +338,7 @@ function setPlayUI(playing) {
 }
 function setStatus(msg) { $('status').textContent = msg; }
 
-// ── Theme menu ───────────────────────────────────────────────
+// ── Theme menu ────────────────────────────────────────────────
 function buildMenu() {
   for (const [k, t] of Object.entries(THEMES)) {
     const b = document.createElement('button');
@@ -322,98 +367,117 @@ function choose(k) {
   $('next-scene').classList.remove('next');
   setTimeout(() => { $('scene').style.backgroundImage = 'url(' + t.image + ')'; $('next-scene').classList.add('next'); }, 710);
   try { localStorage.setItem('mehfil-theme', k); } catch(e) {}
-  if (started && player) loadThemePlaylist();
+  if (started) loadThemePlaylist();
 }
 
-// ── YouTube playback ─────────────────────────────────────────
-function loadThemePlaylist() {
-  setStatus('Loading…');
-  $('track').textContent = 'Loading ' + THEMES[active].label + '…';
-  $('channel').textContent = THEMES[active].label;
-  player.loadPlaylist({ listType: 'playlist', list: THEMES[active].playlist, index: 0 });
-  setTimeout(() => { try { player.setShuffle(true); player.setLoop(true); } catch(e) {} }, 2000);
+// ── Fetch playlist video IDs via Invidious ────────────────────
+async function fetchPlaylistIds(playlistId) {
+  if (PLAYLIST_CACHE[playlistId]) return PLAYLIST_CACHE[playlistId];
+  for (const host of INVIDIOUS) {
+    try {
+      const res = await fetch(host + '/api/v1/playlists/' + playlistId + '?fields=videos');
+      if (!res.ok) continue;
+      const data = await res.json();
+      const ids = (data.videos || []).map(v => ({ videoId: v.videoId, title: v.title, author: v.author }));
+      if (ids.length) { PLAYLIST_CACHE[playlistId] = ids; return ids; }
+    } catch(e) {}
+  }
+  return [];
 }
 
-function playVideoById(videoId, title, artist) {
+// ── Core: fetch highest-quality stream URL via Netlify function
+async function fetchStreamUrl(videoId) {
+  const res = await fetch('/.netlify/functions/stream?id=' + videoId);
+  if (!res.ok) throw new Error('stream fetch failed');
+  return res.json(); // { url, codec, bitrate, title, author }
+}
+
+// ── Play a video by ID through HTML5 audio + Web Audio chain ──
+async function playVideoById(videoId, title, artist) {
   if (!started) { started = true; $('start').classList.add('gone'); }
+  initAudioContext();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  currentVideoId = videoId;
   $('track').textContent = title || 'Loading…';
   $('channel').textContent = artist || '';
-  setStatus('Loading…');
-  player.loadVideoById(videoId);
+  setStatus('Fetching stream…');
+  audio.pause();
+  try {
+    const stream = await fetchStreamUrl(videoId);
+    if (currentVideoId !== videoId) return; // superseded
+    audio.src = stream.url;
+    audio.load();
+    await audio.play();
+    if (stream.title) {
+      $('track').textContent = stream.title;
+      $('channel').textContent = stream.author || artist || '';
+    }
+    if ('mediaSession' in navigator)
+      navigator.mediaSession.metadata = new MediaMetadata({ title: stream.title || title || '', artist: stream.author || artist || '', album: 'Mehfil FM' });
+  } catch(err) {
+    if (currentVideoId !== videoId) return;
+    toast('Skipping unavailable track…');
+    playNext();
+  }
 }
 
-window.onYouTubeIframeAPIReady = function() {
-  player = new YT.Player('yt-player', {
-    width: 320, height: 180,
-    playerVars: { autoplay: 1, playsinline: 1, controls: 0, rel: 0, modestbranding: 1, iv_load_policy: 3, enablejsapi: 1, origin: location.hostname ? location.origin : '' },
-    events: {
-      onReady() {
-        try {
-          const v = +localStorage.getItem('mehfil-vol');
-          const vol = Number.isFinite(v) && v >= 0 ? v : 80;
-          player.setVolume(vol); $('vol').value = vol;
-        } catch(e) {}
-        if (started) loadThemePlaylist();
-      },
-      onStateChange(e) {
-        const S = YT.PlayerState;
-        if (e.data === S.PLAYING) {
-          setPlayUI(true);
-          try {
-            const d = player.getVideoData();
-            if (d && d.title) {
-              $('track').textContent = d.title;
-              $('channel').textContent = d.author || THEMES[active].label;
-              if ('mediaSession' in navigator)
-                navigator.mediaSession.metadata = new MediaMetadata({ title: d.title, artist: d.author || '', album: 'Mehfil FM' });
-            }
-          } catch(err) {}
-        } else if (e.data === S.PAUSED) {
-          setPlayUI(false);
-        } else if (e.data === S.BUFFERING) {
-          setStatus('Buffering…');
-          // don't reset play UI — still playing, just buffering
-        } else if (e.data === S.ENDED) {
-          try { player.nextVideo(); } catch(err) {}
-        } else if (e.data === S.UNSTARTED) {
-          // playlist loaded but not started — kick it off
-          setTimeout(() => { try { player.playVideo(); } catch(err) {} }, 500);
-        }
-      },
-      onError() {
-        toast('Skipping unavailable track…');
-        setTimeout(() => { try { player.nextVideo(); } catch(err) {} }, 1000);
-      }
-    }
-  });
-};
+function playNext() {
+  if (!queue.length) return;
+  queueIdx = (queueIdx + 1) % queue.length;
+  const v = queue[queueIdx];
+  playVideoById(v.videoId, v.title, v.author);
+}
+function playPrev() {
+  if (!queue.length) return;
+  queueIdx = (queueIdx - 1 + queue.length) % queue.length;
+  const v = queue[queueIdx];
+  playVideoById(v.videoId, v.title, v.author);
+}
 
-const ytScript = document.createElement('script');
-ytScript.src = 'https://www.youtube.com/iframe_api';
-document.head.append(ytScript);
+async function loadThemePlaylist() {
+  setStatus('Loading playlist…');
+  $('track').textContent = 'Loading ' + THEMES[active].label + '…';
+  $('channel').textContent = THEMES[active].label;
+  const ids = await fetchPlaylistIds(THEMES[active].playlist);
+  if (!ids.length) { setStatus('Playlist unavailable'); return; }
+  // Fisher-Yates shuffle
+  queue = [...ids];
+  for (let i = queue.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [queue[i], queue[j]] = [queue[j], queue[i]];
+  }
+  queueIdx = 0;
+  playVideoById(queue[0].videoId, queue[0].title, queue[0].author);
+}
+
+// ── Audio element events ──────────────────────────────────────
+audio.addEventListener('playing', () => setPlayUI(true));
+audio.addEventListener('pause', () => setPlayUI(false));
+audio.addEventListener('waiting', () => setStatus('Buffering…'));
+audio.addEventListener('canplay', () => { if (!audio.paused) setStatus('Playing'); });
+audio.addEventListener('ended', playNext);
+audio.addEventListener('error', () => { toast('Skipping unavailable track…'); playNext(); });
 
 function startPlayback() {
   started = true;
   $('start').classList.add('gone');
-  if (player) loadThemePlaylist();
-  else setStatus('Connecting…');
+  loadThemePlaylist();
 }
 
-// ── Player controls ──────────────────────────────────────────
+// ── Player controls ───────────────────────────────────────────
 $('start-btn').onclick = startPlayback;
 $('btn-play').onclick = () => {
   if (!started) return startPlayback();
-  if (!player) return;
-  const s = player.getPlayerState();
-  if (s === YT.PlayerState.PLAYING) player.pauseVideo();
-  else if (s === YT.PlayerState.PAUSED) player.playVideo();
-  else loadThemePlaylist();
+  initAudioContext();
+  if (audioCtx.state === 'suspended') { audioCtx.resume(); audio.play(); return; }
+  if (audio.paused) audio.play();
+  else audio.pause();
 };
-$('btn-next').onclick = () => { if (!started) return startPlayback(); try { player.nextVideo(); } catch(e) {} };
-$('btn-prev').onclick = () => { if (!started) return startPlayback(); try { player.previousVideo(); } catch(e) {} };
+$('btn-next').onclick = () => { if (!started) return startPlayback(); playNext(); };
+$('btn-prev').onclick = () => { if (!started) return startPlayback(); playPrev(); };
 $('vol').oninput = () => {
   const v = +$('vol').value;
-  try { player.setVolume(v); } catch(e) {}
+  if (gainNode) gainNode.gain.value = v / 100;
   try { localStorage.setItem('mehfil-vol', v); } catch(e) {}
 };
 $('toggle').onclick = () => { $('menu').classList.toggle('open'); $('toggle').setAttribute('aria-expanded', $('menu').classList.contains('open')); };
@@ -429,10 +493,10 @@ document.addEventListener('keydown', e => {
   if (/^[1-6]$/.test(e.key)) choose(keys[+e.key - 1]);
 });
 if ('mediaSession' in navigator) {
-  navigator.mediaSession.setActionHandler('play', () => $('btn-play').click());
-  navigator.mediaSession.setActionHandler('pause', () => $('btn-play').click());
-  navigator.mediaSession.setActionHandler('nexttrack', () => $('btn-next').click());
-  navigator.mediaSession.setActionHandler('previoustrack', () => $('btn-prev').click());
+  navigator.mediaSession.setActionHandler('play', () => { if (audio.paused) audio.play(); });
+  navigator.mediaSession.setActionHandler('pause', () => audio.pause());
+  navigator.mediaSession.setActionHandler('nexttrack', playNext);
+  navigator.mediaSession.setActionHandler('previoustrack', playPrev);
 }
 
 // ── Search ───────────────────────────────────────────────────
@@ -787,6 +851,8 @@ $('modal-new-pl').onclick = () => {
 // ── Init ─────────────────────────────────────────────────────
 buildMenu();
 try { active = localStorage.getItem('mehfil-theme') || active; } catch(e) {}
+// restore volume slider
+try { const v = +localStorage.getItem('mehfil-vol'); if (Number.isFinite(v) && v >= 0) $('vol').value = v; } catch(e) {}
 choose(THEMES[active] ? active : 'corporate');
 </script>
 </body>

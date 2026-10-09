@@ -1,0 +1,20 @@
+{
+  "name": "yt-audio-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.3.1",
+    "@fastify/formbody": "^7.4.0",
+    "@fastify/static": "^7.0.4",
+    "bcrypt": "^5.1.1",
+    "better-sqlite3": "^11.3.0",
+    "fastify": "^4.28.1"
+  }
+}

@@ -1,2 +1,11 @@
 node_modules/
-.netlify/
+data/
+*.db
+*.db-journal
+*.db-wal
+.env
+cookies.txt
+test.webm
+frontend/node_modules/
+frontend/dist/
+.DS_Store

@@ -16,7 +16,7 @@ function streamVideo(videoId) {
 
   const args = [
     '-f',
-    '251/140',
+    '251/140/bestaudio/best',
     '-o',
     '-',
     '--no-playlist',

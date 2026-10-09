@@ -1,6 +1,11 @@
 node_modules
-data
-.env
-cookies.txt
 frontend/node_modules
 frontend/dist
+data
+podman-data
+.env
+cookies.txt
+.git
+.gitignore
+*.md
+test.webm

@@ -62,7 +62,7 @@
           layer.style.opacity = '1';
         });
       };
-      if (/^(https?:|data:image\/)/i.test(theme.background || '')) {
+      if (/^(https?:|data:image\/|\/|\.\/)/i.test(theme.background || '')) {
         const image = new Image();
         image.onload = () => {
           layer.style.backgroundImage = `url("${theme.background}")`;

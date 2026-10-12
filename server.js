@@ -102,10 +102,6 @@ function createServer() {
 
   app.register(cookie);
   app.register(formbody);
-  app.register(fastifyStatic, {
-    root: publicDirectory,
-    prefix: '/',
-  });
 
   app.get('/health', async () => ({
     status: 'ok',
@@ -432,6 +428,21 @@ function createServer() {
     `).run(playlistId, request.user.id);
     if (result.changes === 0) return reply.code(404).send({ error: 'Playlist not found' });
     return reply.send({ ok: true });
+  });
+
+  app.register(fastifyStatic, {
+    root: publicDirectory,
+    prefix: '/',
+    wildcard: true,
+    index: ['index.html'],
+    decorateReply: true,
+  });
+
+  app.setNotFoundHandler((request, reply) => {
+    if (request.raw.url.startsWith('/api/') || request.raw.url.startsWith('/stream')) {
+      return reply.code(404).send({ error: 'Not Found' });
+    }
+    return reply.sendFile('index.html');
   });
 
   return app;

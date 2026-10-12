@@ -323,56 +323,30 @@
 
 {#if !user}
   <main class="auth-page">
+    <div class="auth-bg" aria-hidden="true"></div>
     <section class="auth-card">
       <div class="brand-mark">♪</div>
       <p class="eyebrow">YOUR SOUNDTRACK, YOUR WAY</p>
       <h1>Welcome to <span>Mehfil</span></h1>
-      <p class="auth-subtitle">Sign in to find the music for every moment.</p>
+      <p class="auth-subtitle">A mehfil for every mood — from shaadi sangeet to midnight drives.</p>
 
       <div class="auth-tabs" role="tablist" aria-label="Authentication">
-        <button
-          class:chosen={authMode === 'login'}
-          role="tab"
-          aria-selected={authMode === 'login'}
-          onclick={() => { authMode = 'login'; authError = ''; }}
-        >Log in</button>
-        <button
-          class:chosen={authMode === 'signup'}
-          role="tab"
-          aria-selected={authMode === 'signup'}
-          onclick={() => { authMode = 'signup'; authError = ''; }}
-        >Create account</button>
+        <button class:chosen={authMode === 'login'} role="tab" aria-selected={authMode === 'login'} onclick={() => { authMode = 'login'; authError = ''; }}>Log in</button>
+        <button class:chosen={authMode === 'signup'} role="tab" aria-selected={authMode === 'signup'} onclick={() => { authMode = 'signup'; authError = ''; }}>Create account</button>
       </div>
 
       <form onsubmit={handleAuth}>
         <label for="username">Username</label>
-        <input
-          id="username"
-          name="username"
-          autocomplete="username"
-          minlength="3"
-          maxlength="32"
-          required
-          bind:value={authUsername}
-          placeholder="Your username"
-        />
+        <input id="username" name="username" autocomplete="username" minlength="3" maxlength="32" required bind:value={authUsername} placeholder="Your username" />
         <label for="password">Password</label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          autocomplete={authMode === 'login' ? 'current-password' : 'new-password'}
-          minlength="8"
-          required
-          bind:value={authPassword}
-          placeholder="At least 8 characters"
-        />
+        <input id="password" name="password" type="password" autocomplete={authMode === 'login' ? 'current-password' : 'new-password'} minlength="8" required bind:value={authPassword} placeholder="At least 8 characters" />
         {#if authError}<p class="form-error" role="alert">{authError}</p>{/if}
         <button class="primary-button auth-submit" type="submit" disabled={authLoading}>
           {authLoading ? 'Please wait…' : authMode === 'login' ? 'Log in' : 'Create account'}
         </button>
       </form>
     </section>
+    <footer class="auth-footer">Every moment has a melody.</footer>
   </main>
 {:else}
   <div id="bg-layer" aria-hidden="true"></div>

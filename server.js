@@ -95,7 +95,7 @@ function validTrackInput(body) {
       || (Number.isInteger(body.duration) && body.duration >= 0));
 }
 
-function createServer() {
+async function createServer() {
   const app = Fastify({ logger: true });
   const publicDirectory = path.join(__dirname, 'public');
   fs.mkdirSync(publicDirectory, { recursive: true });
@@ -445,6 +445,8 @@ function createServer() {
     return reply.sendFile('index.html');
   });
 
+  await app.register(require('./subsonic'));
+
   return app;
 }
 
@@ -457,7 +459,7 @@ async function start() {
     return;
   }
 
-  const app = createServer();
+  const app = await createServer();
   const port = Number(process.env.PORT) || 3000;
   try {
     await app.listen({ port, host: '0.0.0.0' });

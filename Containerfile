@@ -19,7 +19,7 @@ RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o 
 WORKDIR /app
 COPY --from=backend-builder /app/node_modules ./node_modules
 COPY package*.json ./
-COPY server.js db.js ytdlp.js themes.js ./
+COPY server.js db.js ytdlp.js themes.js subsonic.js ./
 COPY --from=frontend-builder /frontend/dist ./public
 RUN mkdir -p /app/data && chown -R node:node /app
 USER node

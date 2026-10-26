@@ -1,6 +1,16 @@
 'use strict';
 
+const fs = require('fs');
 const { spawn } = require('node:child_process');
+
+let cookieFilePath = null;
+
+if (process.env.YTDLP_COOKIES_B64) {
+  cookieFilePath = '/tmp/yt-cookies.txt';
+  const cookies = Buffer.from(process.env.YTDLP_COOKIES_B64, 'base64').toString('utf-8');
+  fs.writeFileSync(cookieFilePath, cookies);
+  console.log('YouTube cookies initialized');
+}
 
 const SEARCH_CACHE_TTL_MS = 30_000;
 const searchCache = new Map();
@@ -28,6 +38,18 @@ function streamVideo(videoId) {
   if (process.env.YTDLP_COOKIES) {
     args.push('--cookies', process.env.YTDLP_COOKIES);
   }
+  if (cookieFilePath !== null) {
+    args.push('--cookies', cookieFilePath);
+  }
+
+  args.push(
+    '--extractor-args',
+    'youtube:player_client=tv,mweb',
+    '--source-address',
+    '0.0.0.0',
+    '--retries',
+    '10',
+  );
 
   args.push(`https://www.youtube.com/watch?v=${videoId}`);
   return spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });

@@ -27,6 +27,9 @@ function streamVideo(videoId) {
   const args = [
     '-f',
     '251/140/bestaudio/best',
+    '--no-cache-dir',
+    '--paths',
+    'temp:/tmp',
     '-o',
     '-',
     '--no-playlist',
@@ -44,15 +47,21 @@ function streamVideo(videoId) {
 
   args.push(
     '--extractor-args',
-    'youtube:player_client=tv,mweb',
+    'youtube:player_client=web_safari,ios',
     '--source-address',
     '0.0.0.0',
     '--retries',
     '10',
+    '--geo-bypass',
+    '--force-ipv4',
   );
 
   args.push(`https://www.youtube.com/watch?v=${videoId}`);
-  return spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stderr.on('data', (data) => {
+    console.error(`[yt-dlp stderr] ${data.toString()}`);
+  });
+  return child;
 }
 
 function search(query, limit = 10) {

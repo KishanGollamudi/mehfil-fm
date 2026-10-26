@@ -1,16 +1,6 @@
 'use strict';
 
-const fs = require('fs');
 const { spawn } = require('node:child_process');
-
-let cookieFilePath = null;
-
-if (process.env.YTDLP_COOKIES_B64) {
-  cookieFilePath = '/tmp/yt-cookies.txt';
-  const cookies = Buffer.from(process.env.YTDLP_COOKIES_B64, 'base64').toString('utf-8');
-  fs.writeFileSync(cookieFilePath, cookies);
-  console.log('YouTube cookies initialized');
-}
 
 const SEARCH_CACHE_TTL_MS = 30_000;
 const searchCache = new Map();
@@ -25,51 +15,25 @@ function streamVideo(videoId) {
   }
 
   const args = [
-    '-f',
-    '251/140/bestaudio/best',
-    '--no-cache-dir',
-    '--paths',
-    'temp:/tmp',
-    '-o',
-    '-',
+    '-f', '251/140/bestaudio/best',
+    '-o', '-',
     '--no-playlist',
     '--no-warnings',
     '--quiet',
-    '--no-part',
+    '--no-part'
   ];
 
   if (process.env.YTDLP_COOKIES) {
     args.push('--cookies', process.env.YTDLP_COOKIES);
   }
-  if (cookieFilePath !== null) {
-    args.push('--cookies', cookieFilePath);
-  }
-
-  args.push(
-    '--extractor-args',
-    'youtube:player_client=web_safari,ios',
-    '--source-address',
-    '0.0.0.0',
-    '--retries',
-    '10',
-    '--geo-bypass',
-    '--force-ipv4',
-  );
 
   args.push(`https://www.youtube.com/watch?v=${videoId}`);
-  const child = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stderr.on('data', (data) => {
-    console.error(`[yt-dlp stderr] ${data.toString()}`);
-  });
-  return child;
+  return spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 function search(query, limit = 10) {
   if (typeof query !== 'string' || !query.trim()) {
     return Promise.reject(new TypeError('Search query must not be empty'));
-  }
-  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
-    return Promise.reject(new RangeError('Search limit must be an integer from 1 to 50'));
   }
 
   const cacheKey = `${query}|${limit}`;
@@ -77,9 +41,7 @@ function search(query, limit = 10) {
   if (cached && cached.expiresAt > Date.now()) {
     return Promise.resolve(cached.results);
   }
-  if (cached) {
-    searchCache.delete(cacheKey);
-  }
+  if (cached) searchCache.delete(cacheKey);
 
   return new Promise((resolve, reject) => {
     const args = [
@@ -96,16 +58,9 @@ function search(query, limit = 10) {
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk;
-    });
-    child.once('error', (error) => {
-      settled = true;
-      reject(error);
-    });
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', (error) => { settled = true; reject(error); });
     child.once('close', (code, signal) => {
       if (settled) return;
       settled = true;
@@ -122,8 +77,7 @@ function search(query, limit = 10) {
           .map((line) => {
             const entry = JSON.parse(line);
             const thumbnails = Array.isArray(entry.thumbnails) ? entry.thumbnails : [];
-            const thumbnail = entry.thumbnail
-              || (thumbnails.length ? thumbnails[thumbnails.length - 1].url : '');
+            const thumbnail = entry.thumbnail || (thumbnails.length ? thumbnails[thumbnails.length - 1].url : '');
 
             return {
               videoId: entry.id,
@@ -135,10 +89,7 @@ function search(query, limit = 10) {
           })
           .filter((track) => isValidVideoId(track.videoId));
 
-        searchCache.set(cacheKey, {
-          results,
-          expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
-        });
+        searchCache.set(cacheKey, { results, expiresAt: Date.now() + SEARCH_CACHE_TTL_MS });
         resolve(results);
       } catch (error) {
         reject(new Error(`Unable to parse yt-dlp search results: ${error.message}`));

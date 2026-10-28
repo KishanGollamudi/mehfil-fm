@@ -105,7 +105,7 @@ class AudioPlayer {
     this.errorMessage = messages[code] || 'Unable to play this track.';
     this._consecutiveErrors += 1;
     if (this._consecutiveErrors >= 3) {
-      this.errorMessage = 'Multiple tracks failed. Check your connection or YouTube access.';
+      this.errorMessage = 'Multiple tracks failed. Check your connection and try again.';
       this.skip();
       return;
     }

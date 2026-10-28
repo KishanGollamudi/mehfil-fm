@@ -8,10 +8,11 @@ const Fastify = require('fastify');
 const cookie = require('@fastify/cookie');
 const formbody = require('@fastify/formbody');
 const fastifyStatic = require('@fastify/static');
+const { Readable } = require('node:stream');
 
 const db = require('./db');
 const themes = require('./themes');
-const { isValidVideoId, streamVideo, search } = require('./ytdlp');
+const { isValidSongId, resolveAudioUrl, search } = require('./jiosaavn');
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
@@ -70,7 +71,7 @@ async function requireAuth(request, reply) {
 }
 
 function validTrackInput(body) {
-  return body && typeof body === 'object' && isValidVideoId(body.videoId) &&
+  return body && typeof body === 'object' && isValidSongId(body.videoId) &&
     typeof body.title === 'string' && body.title.trim().length > 0 &&
     typeof body.artist === 'string';
 }
@@ -85,76 +86,69 @@ async function createServer() {
 
   app.get('/health', async () => ({ status: 'ok', uptime: process.uptime() }));
 
-  app.get('/stream', async (request, reply) => {
-    const videoId = request.query && request.query.id;
-    if (!isValidVideoId(videoId)) return reply.code(400).send({ error: 'Invalid video ID' });
-
-    let child;
-    try {
-      child = streamVideo(videoId);
-    } catch (error) {
-      request.log.error({ err: error }, 'Unable to start yt-dlp stream');
-      return reply.code(502).send({ error: 'Unable to start audio stream' });
+  async function resolveStreamId(request, reply) {
+    const id = request.params?.id || request.query?.id || request.query?.videoId;
+    if (!id || !isValidSongId(id)) {
+      reply.code(400).send({ error: 'Invalid song ID' });
+      return null;
     }
-    reply.hijack();
+    try {
+      return await resolveAudioUrl(id);
+    } catch (error) {
+      request.log.error({ err: error }, 'Unable to resolve JioSaavn audio URL');
+      reply.code(502).send({ error: 'Unable to resolve audio stream' });
+      return null;
+    }
+  }
 
-    let headersSent = false;
-    let childClosed = false;
-    let killTimer;
+  app.get('/stream', async (request, reply) => {
+    const audioUrl = await resolveStreamId(request, reply);
+    if (!audioUrl) return reply;
+    return reply.redirect(audioUrl, 302);
+  });
 
-    const stopChild = () => {
-      if (childClosed || child.killed) return;
-      child.kill('SIGTERM');
-      killTimer = setTimeout(() => { if (!childClosed) child.kill('SIGKILL'); }, 3000);
-      killTimer.unref();
-    };
+  app.get('/stream/:id', async (request, reply) => {
+    const audioUrl = await resolveStreamId(request, reply);
+    if (!audioUrl) return reply;
+    return reply.redirect(audioUrl, 302);
+  });
 
-    const sendAudioHeaders = () => {
-      reply.raw.writeHead(200, {
-        'Content-Type': 'audio/webm; codecs=opus',
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no',
-      });
-      headersSent = true;
-    };
+  app.get('/proxy-stream', async (request, reply) => {
+    const id = request.params?.id || request.query?.id || request.query?.videoId;
+    if (!id || !isValidSongId(id)) return reply.code(400).send({ error: 'Invalid song ID' });
 
-    reply.raw.once('close', () => { if (!reply.raw.writableEnded) stopChild(); });
-
-    child.stdout.once('data', (firstChunk) => {
-      if (reply.raw.destroyed) { stopChild(); return; }
-      sendAudioHeaders();
-      reply.raw.write(firstChunk);
-      child.stdout.pipe(reply.raw);
-    });
-
-    child.once('error', (error) => {
-      request.log.error({ err: error }, 'yt-dlp stream process error');
-      if (!headersSent && !reply.raw.headersSent) {
-        reply.raw.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-        reply.raw.end(JSON.stringify({ error: 'Unable to start audio stream' }));
-      } else if (!reply.raw.destroyed) {
-        reply.raw.destroy(error);
+    try {
+      const audioUrl = await resolveAudioUrl(id);
+      const upstream = await fetch(audioUrl);
+      if (!upstream.ok) {
+        return reply.code(upstream.status || 502).send({ error: 'Unable to proxy audio stream' });
       }
-    });
+      reply.header('Content-Type', upstream.headers.get('content-type') || 'audio/mp4');
+      reply.header('Accept-Ranges', 'bytes');
+      return reply.send(upstream.body);
+    } catch (error) {
+      request.log.error({ err: error }, 'Unable to proxy JioSaavn audio URL');
+      return reply.code(502).send({ error: 'Unable to proxy audio stream' });
+    }
+  });
 
-    child.once('close', (code, signal) => {
-      childClosed = true;
-      if (killTimer) clearTimeout(killTimer);
-      if (!headersSent) {
-        if (!reply.raw.headersSent) {
-          reply.raw.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-          reply.raw.end(JSON.stringify({ error: 'Audio stream was empty' }));
-        }
-        return;
-      }
-      if (code !== 0) {
-        request.log.error({ code, signal }, 'yt-dlp stream exited unsuccessfully');
-        if (!reply.raw.destroyed) reply.raw.destroy();
-      }
-    });
+  app.get('/proxy-stream/:id', async (request, reply) => {
+    const id = request.params?.id || request.query?.id || request.query?.videoId;
+    if (!id || !isValidSongId(id)) return reply.code(400).send({ error: 'Invalid song ID' });
 
-    return reply;
+    try {
+      const audioUrl = await resolveAudioUrl(id);
+      const upstream = await fetch(audioUrl);
+      if (!upstream.ok) {
+        return reply.code(upstream.status || 502).send({ error: 'Unable to proxy audio stream' });
+      }
+      reply.header('Content-Type', upstream.headers.get('content-type') || 'audio/mp4');
+      reply.header('Accept-Ranges', 'bytes');
+      return reply.send(upstream.body);
+    } catch (error) {
+      request.log.error({ err: error }, 'Unable to proxy JioSaavn audio URL');
+      return reply.code(502).send({ error: 'Unable to proxy audio stream' });
+    }
   });
 
   app.post('/api/auth/signup', async (request, reply) => {
@@ -211,10 +205,15 @@ async function createServer() {
   app.get('/api/themes/:id/tracks', { preHandler: requireAuth }, async (request, reply) => {
     const theme = themes.find((item) => item.id === request.params.id);
     if (!theme || theme.searchable) return reply.code(404).send({ error: 'Theme not found' });
-    const resultSets = await Promise.all(theme.queries.map((query) => search(query)));
+    const settled = await Promise.allSettled(theme.queries.map((query) => search(query)));
     const seen = new Set();
     const tracks = [];
-    for (const results of resultSets) {
+    for (const { status, value, reason } of settled) {
+      if (status === 'rejected') {
+        request.log.warn({ err: reason }, 'Theme search query failed');
+        continue;
+      }
+      const results = value;
       for (const track of results) {
         if (!seen.has(track.videoId)) { seen.add(track.videoId); tracks.push(track); }
         if (tracks.length >= 25) break;

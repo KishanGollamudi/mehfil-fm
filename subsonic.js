@@ -2,10 +2,8 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const http = require('node:http');
-const https = require('node:https');
 const path = require('node:path');
-const { isValidVideoId, search } = require('./ytdlp');
+const { isValidSongId, resolveAudioUrl, resolveSong, search } = require('./jiosaavn');
 const themes = require('./themes');
 
 const VERSION = '1.16.1';
@@ -114,13 +112,13 @@ function asSong(track, albumId, albumName) {
     track: 1,
     year: 2024,
     genre: 'Music',
-    contentType: 'audio/webm',
+    contentType: 'audio/mp4',
     coverArt: track.videoId,
     size: 5000000,
-    suffix: 'webm',
+    suffix: 'm4a',
     duration: track.duration || 0,
     bitRate: 160,
-    path: `${artistName}/${albumName}/${title}.webm`,
+    path: `${artistName}/${albumName}/${title}.m4a`,
     isVideo: false,
     created: new Date().toISOString(),
     type: 'music',
@@ -163,112 +161,30 @@ function coverArtFile(theme) {
   return null;
 }
 
-function streamProxy(request, reply, videoId) {
-  if (!isValidVideoId(videoId)) {
+async function streamProxy(request, reply, songId) {
+  if (!isValidSongId(songId)) {
     return sendError(reply, request, 10, 'Invalid or missing parameter: id');
   }
-
-  const socket = request.raw.socket;
-  if (!socket.localAddress || !socket.localPort) {
-    return sendError(reply, request, 0, 'Unable to proxy audio stream', 502);
+  try {
+    return reply.redirect(302, await resolveAudioUrl(songId));
+  } catch (error) {
+    request.log.error({ err: error }, 'Subsonic audio redirect failed');
+    return sendError(reply, request, 0, 'Unable to resolve audio stream', 502);
   }
-
-  const transport = socket.encrypted ? https : http;
-  const proxyRequest = transport.request({
-    hostname: socket.localAddress,
-    port: socket.localPort,
-    method: 'GET',
-    path: `/stream?id=${encodeURIComponent(videoId)}`,
-    agent: false,
-  }, (proxyResponse) => {
-    if (proxyResponse.statusCode !== 200) {
-      reply.raw.writeHead(proxyResponse.statusCode || 502, {
-        'Content-Type': proxyResponse.headers['content-type'] || 'application/json; charset=utf-8',
-      });
-    } else {
-      reply.raw.writeHead(200, {
-        'Content-Type': 'audio/webm; codecs=opus',
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-cache',
-      });
-    }
-    proxyResponse.pipe(reply.raw);
-  });
-
-  reply.hijack();
-  reply.raw.once('close', () => {
-    if (!reply.raw.writableEnded) proxyRequest.destroy();
-  });
-  proxyRequest.once('error', (error) => {
-    request.log.error({ err: error }, 'Subsonic stream proxy error');
-    if (!reply.raw.headersSent) {
-      reply.raw.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-      reply.raw.end(JSON.stringify({ error: 'Unable to proxy audio stream' }));
-    } else if (!reply.raw.destroyed) {
-      reply.raw.destroy(error);
-    }
-  });
-  proxyRequest.end();
-  return reply;
 }
 
-async function proxyThumbnail(videoId, reply) {
-  const candidates = [
-    `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-    `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
-    `https://i.ytimg.com/vi/${videoId}/default.jpg`,
-  ];
-  const png = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
-    'base64',
-  );
-
-  const sendPlaceholder = (statusCode) => {
-    if (reply.raw.destroyed) return reply;
-    reply.raw.writeHead(statusCode, {
-      'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=86400',
-      'Content-Length': png.length,
-    });
-    reply.raw.end(png);
-    return reply;
-  };
-
-  for (const url of candidates) {
-    const result = await new Promise((resolve) => {
-      let settled = false;
-      const finish = (value) => {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
-      const req = https.get(url, { timeout: 5000 }, (res) => {
-        if (res.statusCode === 200) {
-          reply.raw.writeHead(200, {
-            'Content-Type': 'image/jpeg',
-            'Cache-Control': 'public, max-age=86400',
-          });
-          res.pipe(reply.raw);
-          finish('streaming');
-          return;
-        }
-        res.resume();
-        finish(res.statusCode === 404 ? 'not-found' : 'unavailable');
-      });
-      req.on('error', (error) => {
-        reply.log.error({ err: error, url }, 'Subsonic thumbnail proxy error');
-        finish('error');
-      });
-      req.on('timeout', () => {
-        req.destroy(new Error('Thumbnail request timed out'));
-      });
-    });
-
-    if (result === 'streaming') return reply;
-    if (result === 'error') return sendPlaceholder(502);
+async function redirectThumbnail(request, reply, songId) {
+  if (!isValidSongId(songId)) {
+    return sendError(reply, request, 70, 'Cover art not found');
   }
-
-  return sendPlaceholder(200);
+  try {
+    const track = await resolveSong(songId);
+    if (!track.thumbnail) return sendError(reply, request, 70, 'Cover art not found');
+    return reply.redirect(302, track.thumbnail);
+  } catch (error) {
+    request.log.error({ err: error }, 'Subsonic artwork redirect failed');
+    return sendError(reply, request, 70, 'Cover art not found');
+  }
 }
 
 module.exports = async function subsonicPlugin(fastify, opts) {
@@ -447,9 +363,8 @@ module.exports = async function subsonicPlugin(fastify, opts) {
                 : 'image/jpeg';
             return reply.type(contentType).send(fs.createReadStream(file));
           }
-          if (isValidVideoId(id)) {
-            reply.hijack();
-            return proxyThumbnail(id, reply);
+          if (isValidSongId(id)) {
+            return redirectThumbnail(request, reply, id);
           }
           return sendError(reply, request, 70, 'Cover art not found');
         }

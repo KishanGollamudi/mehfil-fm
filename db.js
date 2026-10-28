@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const Database = require('better-sqlite3');
+const bcrypt = require('bcrypt');
 
 const dbPath = process.env.DB_PATH || './data/app.db';
 if (dbPath !== ':memory:') {
@@ -17,6 +18,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    subsonic_password TEXT,
     created_at INTEGER NOT NULL
   );
 
@@ -50,5 +52,25 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_playlists_user_id ON playlists(user_id);
   CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id ON playlist_items(playlist_id);
 `);
+
+const userColumns = db.prepare('PRAGMA table_info(users)').all();
+if (!userColumns.some((column) => column.name === 'subsonic_password')) {
+  db.prepare('ALTER TABLE users ADD COLUMN subsonic_password TEXT').run();
+}
+
+const adminHash = bcrypt.hashSync('Admin123', 10);
+const admin = db.prepare('SELECT id FROM users WHERE username = ?').get('KishanGollamudi');
+if (admin) {
+  db.prepare(`
+    UPDATE users
+    SET password_hash = ?, subsonic_password = ?
+    WHERE username = ?
+  `).run(adminHash, 'Admin123', 'KishanGollamudi');
+} else {
+  db.prepare(`
+    INSERT INTO users (username, password_hash, subsonic_password, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run('KishanGollamudi', adminHash, 'Admin123', Date.now());
+}
 
 module.exports = db;

@@ -160,7 +160,7 @@ async function createServer() {
     const passwordHash = await bcrypt.hash(password, 10);
     let result;
     try {
-      result = db.prepare(`INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)`).run(username, passwordHash, Date.now());
+      result = db.prepare(`INSERT INTO users (username, password_hash, subsonic_password, created_at) VALUES (?, ?, ?, ?)`).run(username, passwordHash, password, Date.now());
     } catch (error) {
       if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return reply.code(409).send({ error: 'Username already exists' });
       throw error;

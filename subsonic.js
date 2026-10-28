@@ -3,13 +3,12 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const db = require('./db');
 const { isValidSongId, resolveAudioUrl, resolveSong, search } = require('./jiosaavn');
 const themes = require('./themes');
 
 const VERSION = '1.16.1';
 const SERVER_VERSION = '1.0.0';
-const USERNAME = 'mehfil';
-const PASSWORD = 'mehfil123';
 
 function xmlEscape(value) {
   return String(value)
@@ -71,25 +70,47 @@ function sendError(reply, request, code, message, httpStatus = 200) {
 }
 
 async function authenticate(request, reply) {
-  const { u: username, t: token, s: salt } = request.query;
-  const expected = crypto.createHash('md5')
-    .update(`${PASSWORD}${typeof salt === 'string' ? salt : ''}`)
-    .digest();
-  const supplied = Buffer.alloc(expected.length);
-  if (typeof token === 'string') {
-    Buffer.from(token, 'hex').copy(supplied, 0, 0, expected.length);
-  }
-  const tokenMatches = crypto.timingSafeEqual(expected, supplied);
-
-  if (username !== USERNAME
-    || typeof salt !== 'string'
-    || salt.length === 0
-    || typeof token !== 'string'
-    || !/^[a-fA-F0-9]{32}$/.test(token)
-    || !tokenMatches) {
+  const { u: username, t: token, s: salt, p: passwordParam } = request.query;
+  if (typeof username !== 'string' || !username) {
     return sendError(reply, request, 40, 'Wrong username or password', 401);
   }
 
+  const user = db.prepare(`
+    SELECT username, password_hash, subsonic_password
+    FROM users WHERE username = ?
+  `).get(username);
+  if (!user) return sendError(reply, request, 40, 'Wrong username or password', 401);
+
+  const subsonicPassword = user.subsonic_password || '';
+  if (typeof token === 'string' && typeof salt === 'string' && salt.length > 0) {
+    if (!/^[a-fA-F0-9]{32}$/i.test(token)) {
+      return sendError(reply, request, 40, 'Wrong username or password', 401);
+    }
+    const expectedToken = crypto.createHash('md5')
+      .update(subsonicPassword + salt)
+      .digest('hex');
+    if (token.toLowerCase() !== expectedToken.toLowerCase()) {
+      return sendError(reply, request, 40, 'Wrong username or password', 401);
+    }
+    return;
+  }
+
+  if (typeof passwordParam === 'string') {
+    let pass = passwordParam;
+    if (passwordParam.startsWith('enc:')) {
+      try {
+        pass = Buffer.from(passwordParam.slice(4), 'hex').toString('utf8');
+      } catch {
+        return sendError(reply, request, 40, 'Wrong username or password', 401);
+      }
+    }
+    if (pass !== subsonicPassword) {
+      return sendError(reply, request, 40, 'Wrong username or password', 401);
+    }
+    return;
+  }
+
+  return sendError(reply, request, 40, 'Wrong username or password', 401);
 }
 
 function findTheme(id) {

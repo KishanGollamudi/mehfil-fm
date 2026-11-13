@@ -165,14 +165,14 @@ class AudioPlayer {
     }
 
     const selectedIndex = Math.max(0, Math.min(index, this.queue.length - 1));
-    this.playTrack(selectedIndex);
+    void this.playTrack(selectedIndex);
   }
 
   togglePlay() {
     if (!this.audioEl) return;
     if (this.audioEl.paused) {
       if (this.currentIndex < 0 && this.queue.length) {
-        this.playTrack(0);
+        void this.playTrack(0);
       } else if (this.currentIndex >= 0) {
         this.audioEl.play().catch(() => {
           this.errorMessage = 'Unable to resume playback.';
@@ -186,7 +186,7 @@ class AudioPlayer {
   next() {
     if (!this.queue.length) return;
     const nextIndex = this.currentIndex + 1;
-    if (nextIndex < this.queue.length) this.playTrack(nextIndex);
+    if (nextIndex < this.queue.length) void this.playTrack(nextIndex);
     else this.skip();
   }
 
@@ -196,7 +196,7 @@ class AudioPlayer {
       return;
     }
     const nextIndex = this.currentIndex + 1;
-    if (nextIndex < this.queue.length) this.playTrack(nextIndex);
+    if (nextIndex < this.queue.length) void this.playTrack(nextIndex);
     else this.skip();
   }
 
@@ -206,7 +206,7 @@ class AudioPlayer {
       this.seek(0);
       return;
     }
-    this.playTrack(Math.max(0, this.currentIndex - 1));
+    void this.playTrack(Math.max(0, this.currentIndex - 1));
   }
 
   seek(time) {

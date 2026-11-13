@@ -457,7 +457,7 @@ async function start() {
 }
 
 if (require.main === module) {
-  start();
+  void start();
 }
 
 module.exports = { createServer, start, requireAuth };

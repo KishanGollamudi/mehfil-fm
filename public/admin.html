@@ -99,8 +99,8 @@
   <section>
     <h2>Create User</h2>
     <div class="form-row">
-      <input type="text" id="new-username" placeholder="Username (3-32 chars)" autocomplete="off" />
-      <input type="password" id="new-password" placeholder="Password (8+ chars)" autocomplete="new-password" />
+      <input type="text" id="new-username" placeholder="Username (3-32 chars)" aria-label="New username" autocomplete="off" />
+      <input type="password" id="new-password" placeholder="Password (8+ chars)" aria-label="New password" autocomplete="new-password" />
       <button class="btn-primary" id="btn-create">Create Account</button>
     </div>
     <div class="msg" id="create-msg"></div>
@@ -144,7 +144,7 @@
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;width:320px;display:flex;flex-direction:column;gap:14px;">
     <h3 style="font-size:15px;">Reset Password</h3>
     <p id="modal-username" style="color:var(--muted);font-size:13px;"></p>
-    <input type="password" id="modal-password" placeholder="New password (8+ chars)" autocomplete="new-password" />
+    <input type="password" id="modal-password" placeholder="New password (8+ chars)" aria-label="New password" autocomplete="new-password" />
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button class="btn-ghost" id="modal-cancel">Cancel</button>
       <button class="btn-primary" id="modal-confirm">Reset</button>

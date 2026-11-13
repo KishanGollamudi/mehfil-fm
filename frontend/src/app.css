@@ -651,7 +651,6 @@ input:-webkit-autofill:active {
   bottom: 1.5rem;
   left: 18rem;
   display: grid;
-  min-height: 82px;
   grid-template-columns: minmax(180px, 1fr) minmax(300px, 1.25fr) minmax(180px, 1fr);
   align-items: center;
   gap: 24px;

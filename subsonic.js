@@ -190,7 +190,7 @@ async function streamProxy(request, reply, songId) {
     return sendError(reply, request, 10, 'Invalid or missing parameter: id');
   }
   try {
-    return reply.redirect(302, await resolveAudioUrl(songId));
+    return reply.redirect(await resolveAudioUrl(songId));
   } catch (error) {
     request.log.error({ err: error }, 'Subsonic audio redirect failed');
     return sendError(reply, request, 0, 'Unable to resolve audio stream', 502);
@@ -204,7 +204,7 @@ async function redirectThumbnail(request, reply, songId) {
   try {
     const track = await resolveSong(songId);
     if (!track.thumbnail) return sendError(reply, request, 70, 'Cover art not found');
-    return reply.redirect(302, track.thumbnail);
+    return reply.redirect(track.thumbnail);
   } catch (error) {
     request.log.error({ err: error }, 'Subsonic artwork redirect failed');
     return sendError(reply, request, 70, 'Cover art not found');

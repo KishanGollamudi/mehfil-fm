@@ -133,13 +133,13 @@ async function createServer() {
   app.get('/stream', async (request, reply) => {
     const audioUrl = await resolveStreamId(request, reply);
     if (!audioUrl) return reply;
-    return reply.redirect(audioUrl, 302);
+    return reply.redirect(audioUrl);
   });
 
   app.get('/stream/:id', async (request, reply) => {
     const audioUrl = await resolveStreamId(request, reply);
     if (!audioUrl) return reply;
-    return reply.redirect(audioUrl, 302);
+    return reply.redirect(audioUrl);
   });
 
   async function proxyStream(request, reply) {

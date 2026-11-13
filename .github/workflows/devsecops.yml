@@ -1,0 +1,54 @@
+name: DevSecOps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sonarqube:
+    name: SonarQube Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: SonarSource/sonarqube-scan-action@v8.4.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >-
+            -Dsonar.projectKey=KishanGollamudi_Audio-Web
+            -Dsonar.organization=kishangollamudi
+            -Dsonar.sources=server.js,db.js,subsonic.js,jiosaavn.js,themes.js,frontend/src,public/admin.html
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,public/assets/**
+
+  trivy-container-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Filesystem, IaC & secret scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Build container image
+        run: docker build -f Containerfile -t mehfil-fm:${{ github.sha }} .
+
+      - name: Container image scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: mehfil-fm:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'

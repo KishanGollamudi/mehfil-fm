@@ -54,29 +54,8 @@
     document.documentElement.style.setProperty('--accent', theme.accent || '#9d4edd');
     const layer = document.getElementById('bg-layer');
     if (layer) {
-      layer.style.opacity = '0';
-      const applyColor = () => {
-        layer.style.backgroundColor = theme.background || '#0e0e12';
-        layer.style.backgroundImage = 'none';
-        requestAnimationFrame(() => {
-          layer.style.opacity = '1';
-        });
-      };
-      if (/^(https?:|data:image\/|\/|\.\/)/i.test(theme.background || '')) {
-        const image = new Image();
-        image.onload = () => {
-          layer.style.backgroundImage = `url("${theme.background}")`;
-          requestAnimationFrame(() => {
-            layer.style.opacity = '1';
-          });
-        };
-        image.onerror = applyColor;
-        image.src = theme.background;
-      } else {
-        const preload = new Image();
-        preload.src = theme.background || '';
-        applyColor();
-      }
+      layer.style.backgroundImage = 'none';
+      layer.style.opacity = '1';
     }
 
     searchQuery = '';
@@ -135,6 +114,24 @@
 
   function playFrom(list, index) {
     player.loadQueue(list, index);
+  }
+
+  function currentVisibleTracks() {
+    return activeTheme?.searchable ? searchResults : tracks;
+  }
+
+  function playAll() {
+    const list = currentVisibleTracks();
+    if (list.length) playFrom(list, 0);
+  }
+
+  function shuffleAll() {
+    const list = [...currentVisibleTracks()];
+    for (let index = list.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [list[index], list[swapIndex]] = [list[swapIndex], list[index]];
+    }
+    if (list.length) playFrom(list, 0);
   }
 
   async function openSavePopover(track, event) {
@@ -385,13 +382,18 @@
       </aside>
 
       <main class="main-panel">
+        <div class="library-deck">
         {#if activeTheme}
           <section class="collection-heading">
             <div class="collection-icon" style:--theme-accent={activeTheme.accent}>{activeTheme.icon}</div>
-            <div>
+            <div class="collection-heading-copy">
               <p class="eyebrow">A MEHFIL FOR</p>
               <h1>{activeTheme.name}</h1>
               <p class="collection-description">{activeTheme.description}</p>
+              <div class="collection-actions">
+                <button class="deck-action" onclick={playAll}>▶ <span>Play All</span></button>
+                <button class="deck-action" onclick={shuffleAll}>🔀 <span>Shuffle</span></button>
+              </div>
             </div>
           </section>
         {/if}
@@ -480,6 +482,7 @@
             </div>
           {/if}
         {/if}
+        </div>
       </main>
     </div>
   </div>

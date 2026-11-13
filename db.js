@@ -11,6 +11,7 @@ if (dbPath !== ':memory:') {
 }
 
 const db = new Database(dbPath);
+db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 db.exec(`
@@ -19,6 +20,9 @@ db.exec(`
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     subsonic_password TEXT,
+    role TEXT NOT NULL DEFAULT 'user',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    last_active_at INTEGER,
     created_at INTEGER NOT NULL
   );
 
@@ -53,24 +57,35 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id ON playlist_items(playlist_id);
 `);
 
-const userColumns = db.prepare('PRAGMA table_info(users)').all();
-if (!userColumns.some((column) => column.name === 'subsonic_password')) {
-  db.prepare('ALTER TABLE users ADD COLUMN subsonic_password TEXT').run();
+// Idempotent column migrations for existing databases
+const userColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+const migrations = [
+  ['subsonic_password', 'ALTER TABLE users ADD COLUMN subsonic_password TEXT'],
+  ['role',             "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"],
+  ['is_active',        'ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1'],
+  ['last_active_at',   'ALTER TABLE users ADD COLUMN last_active_at INTEGER'],
+];
+for (const [col, sql] of migrations) {
+  if (!userColumns.includes(col)) db.prepare(sql).run();
 }
 
-const adminHash = bcrypt.hashSync('Admin123', 10);
-const admin = db.prepare('SELECT id FROM users WHERE username = ?').get('KishanGollamudi');
-if (admin) {
+// Admin bootstrap — driven by env vars, falls back to hard-coded defaults
+const adminUsername = process.env.ADMIN_USERNAME || 'KishanGollamudi';
+const adminPassword = process.env.ADMIN_PASSWORD || 'Admin123';
+const adminHash = bcrypt.hashSync(adminPassword, 10);
+
+const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get(adminUsername);
+if (existingAdmin) {
   db.prepare(`
     UPDATE users
-    SET password_hash = ?, subsonic_password = ?
+    SET password_hash = ?, subsonic_password = ?, role = 'admin', is_active = 1
     WHERE username = ?
-  `).run(adminHash, 'Admin123', 'KishanGollamudi');
+  `).run(adminHash, adminPassword, adminUsername);
 } else {
   db.prepare(`
-    INSERT INTO users (username, password_hash, subsonic_password, created_at)
-    VALUES (?, ?, ?, ?)
-  `).run('KishanGollamudi', adminHash, 'Admin123', Date.now());
+    INSERT INTO users (username, password_hash, subsonic_password, role, is_active, created_at)
+    VALUES (?, ?, ?, 'admin', 1, ?)
+  `).run(adminUsername, adminHash, adminPassword, Date.now());
 }
 
 module.exports = db;

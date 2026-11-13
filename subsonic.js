@@ -76,10 +76,11 @@ async function authenticate(request, reply) {
   }
 
   const user = db.prepare(`
-    SELECT username, password_hash, subsonic_password
+    SELECT username, subsonic_password, is_active
     FROM users WHERE username = ?
   `).get(username);
   if (!user) return sendError(reply, request, 40, 'Wrong username or password', 401);
+  if (user.is_active === 0) return sendError(reply, request, 40, 'Wrong username or password', 401);
 
   const subsonicPassword = user.subsonic_password || '';
   if (typeof token === 'string' && typeof salt === 'string' && salt.length > 0) {
@@ -92,6 +93,7 @@ async function authenticate(request, reply) {
     if (token.toLowerCase() !== expectedToken.toLowerCase()) {
       return sendError(reply, request, 40, 'Wrong username or password', 401);
     }
+    db.prepare('UPDATE users SET last_active_at = ? WHERE username = ?').run(Date.now(), username);
     return;
   }
 
@@ -107,6 +109,7 @@ async function authenticate(request, reply) {
     if (pass !== subsonicPassword) {
       return sendError(reply, request, 40, 'Wrong username or password', 401);
     }
+    db.prepare('UPDATE users SET last_active_at = ? WHERE username = ?').run(Date.now(), username);
     return;
   }
 

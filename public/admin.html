@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mehfil FM — Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0e0e12;
+      --surface: #18181f;
+      --border: #2a2a35;
+      --text: #e2e2e8;
+      --muted: #7a7a8c;
+      --accent: #7c6af7;
+      --accent-hover: #9585ff;
+      --danger: #e05252;
+      --danger-hover: #f06060;
+      --success: #4caf7d;
+      --warn: #e0a040;
+      --radius: 8px;
+    }
+
+    body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 16px; font-weight: 600; letter-spacing: .5px; }
+    header span { color: var(--muted); font-size: 13px; }
+
+    main { max-width: 960px; margin: 0 auto; padding: 28px 20px; display: flex; flex-direction: column; gap: 28px; }
+
+    section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    section h2 { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+
+    .form-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    input[type="text"], input[type="password"] {
+      background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+      color: var(--text); padding: 8px 12px; font-size: 14px; flex: 1; min-width: 160px;
+      outline: none; transition: border-color .15s;
+    }
+    input:focus { border-color: var(--accent); }
+
+    button {
+      border: none; border-radius: var(--radius); padding: 8px 16px; font-size: 13px;
+      font-weight: 500; cursor: pointer; transition: background .15s, opacity .15s; white-space: nowrap;
+    }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-danger:hover:not(:disabled)  { background: var(--danger-hover); }
+    .btn-warn    { background: var(--warn); color: #000; }
+    .btn-warn:hover:not(:disabled)    { filter: brightness(1.1); }
+    .btn-ghost   { background: var(--border); color: var(--text); }
+    .btn-ghost:hover:not(:disabled)   { background: #3a3a4a; }
+
+    .msg { font-size: 13px; margin-top: 10px; min-height: 18px; }
+    .msg.ok  { color: var(--success); }
+    .msg.err { color: var(--danger); }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    }
+    .badge-admin   { background: #3a2fa0; color: #b0a8ff; }
+    .badge-user    { background: #1e2a1e; color: #6dbf8a; }
+    .badge-active  { background: #1a2e1a; color: var(--success); }
+    .badge-suspended { background: #2e1a1a; color: var(--danger); }
+
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .purge-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .purge-row p { color: var(--muted); font-size: 13px; flex: 1; }
+
+    #loading { color: var(--muted); font-size: 13px; }
+
+    @media (max-width: 600px) {
+      th:nth-child(4), td:nth-child(4),
+      th:nth-child(5), td:nth-child(5) { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🎵 Mehfil FM — Admin Dashboard</h1>
+  <span id="admin-name"></span>
+</header>
+
+<main>
+
+  <!-- Create User -->
+  <section>
+    <h2>Create User</h2>
+    <div class="form-row">
+      <input type="text" id="new-username" placeholder="Username (3-32 chars)" autocomplete="off" />
+      <input type="password" id="new-password" placeholder="Password (8+ chars)" autocomplete="new-password" />
+      <button class="btn-primary" id="btn-create">Create Account</button>
+    </div>
+    <div class="msg" id="create-msg"></div>
+  </section>
+
+  <!-- User Table -->
+  <section>
+    <h2>Users <span id="loading" style="font-weight:400;text-transform:none;letter-spacing:0"></span></h2>
+    <div id="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Last Active</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="user-tbody"></tbody>
+      </table>
+    </div>
+    <div class="msg" id="table-msg"></div>
+  </section>
+
+  <!-- Purge -->
+  <section>
+    <h2>Danger Zone</h2>
+    <div class="purge-row">
+      <p>Permanently delete all non-admin accounts. This cannot be undone.</p>
+      <button class="btn-danger" id="btn-purge">Purge Unwanted Users</button>
+    </div>
+    <div class="msg" id="purge-msg"></div>
+  </section>
+
+</main>
+
+<!-- Reset Password Modal -->
+<div id="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;width:320px;display:flex;flex-direction:column;gap:14px;">
+    <h3 style="font-size:15px;">Reset Password</h3>
+    <p id="modal-username" style="color:var(--muted);font-size:13px;"></p>
+    <input type="password" id="modal-password" placeholder="New password (8+ chars)" autocomplete="new-password" />
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn-ghost" id="modal-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-confirm">Reset</button>
+    </div>
+    <div class="msg" id="modal-msg"></div>
+  </div>
+</div>
+
+<script>
+  const ROOT_ADMIN_HINT = null; // populated from /api/auth/me
+  let currentAdminUsername = null;
+  let resetTargetId = null;
+
+  // ── Utilities ──────────────────────────────────────────────────────────────
+
+  function fmt(ts) {
+    if (!ts) return '—';
+    return new Date(ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  function setMsg(el, text, type) {
+    el.textContent = text;
+    el.className = 'msg ' + (type || '');
+  }
+
+  async function api(method, url, body) {
+    const opts = { method, credentials: 'include', headers: {} };
+    if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    const res = await fetch(url, opts);
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  // ── Auth guard ─────────────────────────────────────────────────────────────
+
+  async function guardAdmin() {
+    const { ok, data } = await api('GET', '/api/auth/me');
+    if (!ok || data.user?.role !== 'admin') {
+      window.location.replace('/');
+      return false;
+    }
+    currentAdminUsername = data.user.username;
+    document.getElementById('admin-name').textContent = `Logged in as ${currentAdminUsername}`;
+    return true;
+  }
+
+  // ── Load users ─────────────────────────────────────────────────────────────
+
+  async function loadUsers() {
+    const loading = document.getElementById('loading');
+    loading.textContent = '(loading…)';
+    const { ok, data } = await api('GET', '/api/admin/users');
+    loading.textContent = '';
+    if (!ok) { setMsg(document.getElementById('table-msg'), data.error || 'Failed to load users', 'err'); return; }
+
+    const tbody = document.getElementById('user-tbody');
+    tbody.innerHTML = '';
+    for (const u of data.users) {
+      const isRoot = u.username === currentAdminUsername && u.role === 'admin';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${esc(u.username)}</strong></td>
+        <td><span class="badge badge-${u.role}">${u.role}</span></td>
+        <td><span class="badge badge-${u.is_active ? 'active' : 'suspended'}">${u.is_active ? 'Active' : 'Suspended'}</span></td>
+        <td>${fmt(u.created_at)}</td>
+        <td>${fmt(u.last_active_at)}</td>
+        <td class="actions">
+          <button class="btn-ghost btn-reset" data-id="${u.id}" data-name="${esc(u.username)}">Reset PW</button>
+          ${isRoot ? '' : `
+            <button class="btn-${u.is_active ? 'warn' : 'primary'} btn-toggle"
+              data-id="${u.id}" data-active="${u.is_active}">
+              ${u.is_active ? 'Suspend' : 'Activate'}
+            </button>
+            <button class="btn-danger btn-delete" data-id="${u.id}">Delete</button>
+          `}
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    tbody.querySelectorAll('.btn-reset').forEach((btn) => {
+      btn.addEventListener('click', () => openResetModal(Number(btn.dataset.id), btn.dataset.name));
+    });
+    tbody.querySelectorAll('.btn-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => toggleUser(Number(btn.dataset.id), Number(btn.dataset.active)));
+    });
+    tbody.querySelectorAll('.btn-delete').forEach((btn) => {
+      btn.addEventListener('click', () => deleteUser(Number(btn.dataset.id)));
+    });
+  }
+
+  function esc(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Create user ────────────────────────────────────────────────────────────
+
+  document.getElementById('btn-create').addEventListener('click', async () => {
+    const username = document.getElementById('new-username').value.trim();
+    const password = document.getElementById('new-password').value;
+    const msg = document.getElementById('create-msg');
+    setMsg(msg, '');
+    const { ok, data } = await api('POST', '/api/admin/users', { username, password });
+    if (ok) {
+      setMsg(msg, `User "${data.user.username}" created.`, 'ok');
+      document.getElementById('new-username').value = '';
+      document.getElementById('new-password').value = '';
+      loadUsers();
+    } else {
+      setMsg(msg, data.error || 'Failed to create user', 'err');
+    }
+  });
+
+  // ── Toggle suspend/activate ────────────────────────────────────────────────
+
+  async function toggleUser(id, currentActive) {
+    const newActive = currentActive ? 0 : 1;
+    const { ok, data } = await api('PATCH', `/api/admin/users/${id}/status`, { is_active: newActive });
+    const msg = document.getElementById('table-msg');
+    if (ok) { setMsg(msg, `User ${newActive ? 'activated' : 'suspended'}.`, 'ok'); loadUsers(); }
+    else setMsg(msg, data.error || 'Failed to update user', 'err');
+  }
+
+  // ── Delete user ────────────────────────────────────────────────────────────
+
+  async function deleteUser(id) {
+    if (!confirm('Permanently delete this user and all their data?')) return;
+    const { ok, data } = await api('DELETE', `/api/admin/users/${id}`);
+    const msg = document.getElementById('table-msg');
+    if (ok) { setMsg(msg, 'User deleted.', 'ok'); loadUsers(); }
+    else setMsg(msg, data.error || 'Failed to delete user', 'err');
+  }
+
+  // ── Reset password modal ───────────────────────────────────────────────────
+
+  function openResetModal(id, name) {
+    resetTargetId = id;
+    document.getElementById('modal-username').textContent = `User: ${name}`;
+    document.getElementById('modal-password').value = '';
+    setMsg(document.getElementById('modal-msg'), '');
+    const overlay = document.getElementById('modal-overlay');
+    overlay.style.display = 'flex';
+    document.getElementById('modal-password').focus();
+  }
+
+  document.getElementById('modal-cancel').addEventListener('click', () => {
+    document.getElementById('modal-overlay').style.display = 'none';
+  });
+
+  document.getElementById('modal-confirm').addEventListener('click', async () => {
+    const password = document.getElementById('modal-password').value;
+    const msg = document.getElementById('modal-msg');
+    if (password.length < 8) { setMsg(msg, 'Password must be 8+ chars', 'err'); return; }
+    const { ok, data } = await api('PATCH', `/api/admin/users/${resetTargetId}/status`, { password });
+    if (ok) {
+      setMsg(msg, 'Password reset successfully.', 'ok');
+      setTimeout(() => { document.getElementById('modal-overlay').style.display = 'none'; }, 1200);
+    } else {
+      setMsg(msg, data.error || 'Failed to reset password', 'err');
+    }
+  });
+
+  document.getElementById('modal-overlay').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+  });
+
+  // ── Purge ──────────────────────────────────────────────────────────────────
+
+  document.getElementById('btn-purge').addEventListener('click', async () => {
+    if (!confirm('This will permanently delete ALL non-admin users and their data. Are you sure?')) return;
+    const { ok, data } = await api('POST', '/api/admin/users/purge-unwanted');
+    const msg = document.getElementById('purge-msg');
+    if (ok) { setMsg(msg, `Purged ${data.deleted} user(s).`, 'ok'); loadUsers(); }
+    else setMsg(msg, data.error || 'Purge failed', 'err');
+  });
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+
+  (async () => {
+    if (await guardAdmin()) loadUsers();
+  })();
+</script>
+</body>
+</html>

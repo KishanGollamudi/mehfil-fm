@@ -25,13 +25,125 @@ jobs:
             -Dsonar.sources=server.js,db.js,subsonic.js,jiosaavn.js,themes.js,frontend/src,public/admin.html
             -Dsonar.exclusions=**/node_modules/**,**/dist/**,public/assets/**
 
+      - name: Generate SonarQube PDF report
+        if: always()
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq python3-weasyprint
+          sleep 10
+          python3 << 'PYEOF'
+          import urllib.request, json, os, datetime
+
+          token  = os.environ["SONAR_TOKEN"]
+          comp   = "KishanGollamudi_Audio-Web"
+          org    = "kishangollamudi"
+          host   = "https://sonarcloud.io"
+          hdrs   = {"Authorization": f"Bearer {token}"}
+
+          def fetch(url):
+              req = urllib.request.Request(url, headers=hdrs)
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.loads(r.read())
+
+          metrics_url = (
+              f"{host}/api/measures/component"
+              f"?component={comp}"
+              f"&metricKeys=bugs,vulnerabilities,security_hotspots,"
+              f"code_smells,duplicated_lines_density,alert_status"
+          )
+          issues_url = (
+              f"{host}/api/issues/search"
+              f"?componentKeys={comp}&resolved=false&ps=100"
+          )
+
+          try:
+              mdata   = fetch(metrics_url)
+              idata   = fetch(issues_url)
+              metrics = {m["metric"]: m.get("value", "—")
+                         for m in mdata.get("component", {}).get("measures", [])}
+              issues  = idata.get("issues", [])
+              fetch_ok = True
+          except Exception as exc:
+              metrics, issues, fetch_ok = {}, [], False
+              fetch_error = str(exc)
+
+          gate_color = {"OK": "#2e7d32", "ERROR": "#c62828"}.get(
+              metrics.get("alert_status", ""), "#555")
+
+          def esc(s):
+              return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+
+          metric_rows = "".join(
+              f"<tr><td>{esc(k.replace('_',' ').title())}</td><td>{esc(v)}</td></tr>"
+              for k, v in metrics.items() if k != "alert_status"
+          )
+
+          sev_color = {"BLOCKER":"#b71c1c","CRITICAL":"#e53935",
+                       "MAJOR":"#ef6c00","MINOR":"#f9a825","INFO":"#1565c0"}
+          issue_rows = "".join(
+              f"<tr>"
+              f"<td>{esc(i.get('rule',''))}</td>"
+              f"<td style='color:{sev_color.get(i.get(\"severity\",\"\"),\"#333\")};font-weight:600'>"
+              f"{esc(i.get('severity',''))}</td>"
+              f"<td>{esc(i.get('type',''))}</td>"
+              f"<td>{esc(i.get('component','').split(':')[-1])}</td>"
+              f"<td>{esc(i.get('message','')[:120])}</td>"
+              f"</tr>"
+              for i in issues
+          ) or "<tr><td colspan='5' style='text-align:center;color:#555'>No open issues found</td></tr>"
+
+          warn_block = "" if fetch_ok else (
+              f"<p style='color:#c62828;font-weight:600'>"
+              f"⚠ Could not fetch SonarCloud data: {esc(fetch_error)}</p>"
+          )
+
+          html = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>
+          <style>
+            body{{font-family:Arial,sans-serif;font-size:12px;color:#222;margin:32px}}
+            h1{{font-size:20px;margin-bottom:4px}}
+            h2{{font-size:14px;margin-top:24px;border-bottom:1px solid #ccc;padding-bottom:4px}}
+            .gate{{display:inline-block;padding:4px 12px;border-radius:4px;
+                   background:{gate_color};color:#fff;font-weight:700;font-size:13px}}
+            table{{border-collapse:collapse;width:100%;margin-top:8px}}
+            th{{background:#1565c0;color:#fff;padding:6px 8px;text-align:left;font-size:11px}}
+            td{{padding:5px 8px;border-bottom:1px solid #e0e0e0;vertical-align:top}}
+            tr:nth-child(even) td{{background:#f5f5f5}}
+            .meta{{color:#666;font-size:11px;margin-bottom:16px}}
+          </style></head><body>
+          <h1>SonarQube Security Report — Mehfil FM</h1>
+          <p class='meta'>Project: {esc(comp)} &nbsp;|&nbsp;
+             Generated: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
+          {warn_block}
+          <span class='gate'>Quality Gate: {esc(metrics.get('alert_status','UNKNOWN'))}</span>
+          <h2>Metrics</h2>
+          <table><tr><th>Metric</th><th>Value</th></tr>{metric_rows}</table>
+          <h2>Open Issues ({len(issues)})</h2>
+          <table>
+            <tr><th>Rule</th><th>Severity</th><th>Type</th><th>File</th><th>Message</th></tr>
+            {issue_rows}
+          </table>
+          </body></html>"""
+
+          from weasyprint import HTML
+          HTML(string=html).write_pdf("sonarqube-report.pdf")
+          print("sonarqube-report.pdf written")
+          PYEOF
+
+      - name: Upload SonarQube report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonarqube-security-report
+          path: sonarqube-report.pdf
+
   trivy-container-scan:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Filesystem, IaC & secret scan
+      - name: Filesystem, IaC & secret scan (table + JSON)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
@@ -41,10 +153,23 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
 
+      - name: Filesystem scan — JSON output
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'
+          format: json
+          output: trivy-fs.json
+
       - name: Build container image
         run: docker build -f Containerfile -t mehfil-fm:${{ github.sha }} .
 
-      - name: Container image scan
+      - name: Container image scan (table + exit gate)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: mehfil-fm:${{ github.sha }}
@@ -52,3 +177,121 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
+
+      - name: Container image scan — JSON output
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: mehfil-fm:${{ github.sha }}
+          format: json
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'
+          output: trivy-image.json
+
+      - name: Generate Trivy PDF report
+        if: always()
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq python3-weasyprint
+          python3 << 'PYEOF'
+          import json, datetime, pathlib
+
+          def esc(s):
+              return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+
+          sev_color = {"CRITICAL":"#b71c1c","HIGH":"#e53935",
+                       "MEDIUM":"#ef6c00","LOW":"#f9a825","UNKNOWN":"#555"}
+
+          def parse_report(path):
+              rows = []
+              if not pathlib.Path(path).exists():
+                  return rows
+              data = json.loads(pathlib.Path(path).read_text())
+              for result in data.get("Results", []):
+                  target = result.get("Target", "")
+                  # Vulnerabilities
+                  for v in result.get("Vulnerabilities") or []:
+                      rows.append({
+                          "target":  target,
+                          "id":      v.get("VulnerabilityID", ""),
+                          "sev":     v.get("Severity", ""),
+                          "pkg":     v.get("PkgName", ""),
+                          "inst":    v.get("InstalledVersion", ""),
+                          "fixed":   v.get("FixedVersion", "—"),
+                          "title":   v.get("Title", v.get("Description", ""))[:120],
+                      })
+                  # Misconfigurations / secrets
+                  for m in (result.get("Misconfigurations") or []) + (result.get("Secrets") or []):
+                      rows.append({
+                          "target":  target,
+                          "id":      m.get("ID", m.get("RuleID", "")),
+                          "sev":     m.get("Severity", ""),
+                          "pkg":     m.get("Type", ""),
+                          "inst":    "",
+                          "fixed":   "",
+                          "title":   m.get("Title", m.get("Match", ""))[:120],
+                      })
+              return rows
+
+          fs_rows    = parse_report("trivy-fs.json")
+          img_rows   = parse_report("trivy-image.json")
+          all_rows   = fs_rows + img_rows
+
+          def make_section(title, rows):
+              if not rows:
+                  return (f"<h2>{esc(title)} (0 findings)</h2>"
+                          f"<p style='color:#2e7d32;font-weight:600'>✔ No findings</p>")
+              trs = "".join(
+                  f"<tr>"
+                  f"<td>{esc(r['target'])}</td>"
+                  f"<td style='font-family:monospace;font-size:10px'>{esc(r['id'])}</td>"
+                  f"<td style='color:{sev_color.get(r[\"sev\"],\"#333\")};font-weight:700'>{esc(r['sev'])}</td>"
+                  f"<td>{esc(r['pkg'])}</td>"
+                  f"<td>{esc(r['inst'])}</td>"
+                  f"<td>{esc(r['fixed'])}</td>"
+                  f"<td>{esc(r['title'])}</td>"
+                  f"</tr>"
+                  for r in rows
+              )
+              return f"""<h2>{esc(title)} ({len(rows)} findings)</h2>
+              <table>
+                <tr><th>Target</th><th>ID</th><th>Severity</th>
+                    <th>Package</th><th>Installed</th><th>Fixed</th><th>Title</th></tr>
+                {trs}
+              </table>"""
+
+          html = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>
+          <style>
+            body{{font-family:Arial,sans-serif;font-size:11px;color:#222;margin:28px}}
+            h1{{font-size:19px;margin-bottom:4px}}
+            h2{{font-size:13px;margin-top:22px;border-bottom:1px solid #ccc;padding-bottom:3px}}
+            .meta{{color:#666;font-size:11px;margin-bottom:14px}}
+            .summary{{display:flex;gap:24px;margin-bottom:8px}}
+            .badge{{padding:4px 12px;border-radius:4px;color:#fff;font-weight:700;font-size:12px}}
+            table{{border-collapse:collapse;width:100%;margin-top:6px}}
+            th{{background:#1565c0;color:#fff;padding:5px 7px;text-align:left;font-size:10px}}
+            td{{padding:4px 7px;border-bottom:1px solid #e0e0e0;vertical-align:top;word-break:break-word}}
+            tr:nth-child(even) td{{background:#f5f5f5}}
+          </style></head><body>
+          <h1>Trivy Security Report — Mehfil FM</h1>
+          <p class='meta'>Generated: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
+          <div class='summary'>
+            <span class='badge' style='background:#1565c0'>FS findings: {len(fs_rows)}</span>
+            <span class='badge' style='background:#6a1b9a'>Image findings: {len(img_rows)}</span>
+            <span class='badge' style='background:#37474f'>Total: {len(all_rows)}</span>
+          </div>
+          {make_section("Filesystem / IaC / Secrets Scan", fs_rows)}
+          {make_section("Container Image Scan", img_rows)}
+          </body></html>"""
+
+          from weasyprint import HTML
+          HTML(string=html).write_pdf("trivy-report.pdf")
+          print("trivy-report.pdf written")
+          PYEOF
+
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-security-report
+          path: trivy-report.pdf

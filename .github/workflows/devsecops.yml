@@ -20,7 +20,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >-
-            -Dsonar.projectKey=KishanGollamudi_Audio-Web
+            -Dsonar.projectKey=KishanGollamudi_mehfil-fm
             -Dsonar.organization=kishangollamudi
             -Dsonar.sources=server.js,db.js,subsonic.js,jiosaavn.js,themes.js,frontend/src,public/admin.html
             -Dsonar.exclusions=**/node_modules/**,**/dist/**,public/assets/**
@@ -30,13 +30,13 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq python3-weasyprint
+          pip install --quiet --break-system-packages weasyprint
           sleep 10
           python3 << 'PYEOF'
           import urllib.request, json, os, datetime
 
           token  = os.environ["SONAR_TOKEN"]
-          comp   = "KishanGollamudi_Audio-Web"
+          comp   = "KishanGollamudi_mehfil-fm"
           org    = "kishangollamudi"
           host   = "https://sonarcloud.io"
           hdrs   = {"Authorization": f"Bearer {token}"}
@@ -192,7 +192,7 @@ jobs:
       - name: Generate Trivy PDF report
         if: always()
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq python3-weasyprint
+          pip install --quiet --break-system-packages weasyprint
           python3 << 'PYEOF'
           import json, datetime, pathlib
 

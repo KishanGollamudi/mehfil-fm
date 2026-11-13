@@ -20,6 +20,7 @@ COPY --from=backend-builder /app/node_modules ./node_modules
 COPY package*.json ./
 COPY server.js db.js jiosaavn.js themes.js subsonic.js ./
 COPY --from=frontend-builder /frontend/dist ./public
+COPY public/admin.html public/manifest.json public/sw.js ./public/
 RUN mkdir -p /app/data && chown -R node:node /app
 USER node
 ENV NODE_ENV=production PORT=3000 DB_PATH=/app/data/app.db
